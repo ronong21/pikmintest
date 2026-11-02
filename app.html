@@ -13,7 +13,7 @@
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,"Noto Sans KR",sans-serif;padding:16px 16px 40px;max-width:640px;margin-inline:auto}
 header{display:flex;align-items:center;justify-content:space-between;margin:4px 0 12px}
 h1{font-size:22px;margin:0}
-h1 small{font-size:11px;font-weight:400;color:var(--sub);margin-left:6px;letter-spacing:0}
+h1 small{font-size:11px;font-weight:400;color:var(--sub);margin-left:6px;letter-spacing:0;cursor:pointer;text-decoration:underline dotted}
 h2{font-size:16px;margin:0 0 10px}
 .chip{font-size:12px;padding:4px 10px;border-radius:20px;background:var(--soft);color:var(--accent);font-weight:700}
 .chip.off{background:var(--bad);color:var(--bad-ink)}
@@ -474,7 +474,9 @@ document.addEventListener("error", e => {
 document.addEventListener("load", e => { if (e.target.tagName === "IMG") delete e.target.dataset.retry; }, true);
 poll(); setInterval(poll, 2500);
 // 브라우저를 내렸다가 다시 열면 기다리지 않고 바로 새로 불러오기
-document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { poll(); post("/api/check_update"); } });
+post("/api/check_update");  // 화면을 열 때 새 버전 확인
+$("ver").onclick = () => { toast("새 버전 확인 중..."); post("/api/check_update", {force: 1}).then(() => setTimeout(() => { poll().then(() => toast(st && st.update ? "새 버전이 있어요! 위의 [지금 업데이트]" : "지금이 최신 버전이에요")); }, 4000)); };
 window.addEventListener("focus", () => poll());
 window.addEventListener("pageshow", () => poll());
 </script>

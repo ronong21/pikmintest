@@ -67,16 +67,23 @@ def fetch_bundle():
     return tmp if r.returncode == 0 and os.path.getsize(tmp) > 1000 else None
 
 
+def check_update():
+    """gist 에 새 버전이 있는지 확인 → 화면에 [지금 업데이트] 표시. 결과(True/False)를 돌려준다."""
+    try:
+        tmp = fetch_bundle()
+        state["update"] = bool(tmp) and file_md5(tmp) != file_md5(INSTALLED)
+    except Exception:
+        pass
+    state["update_checked"] = time.time()
+    return state["update"]
+
+
 def watch_update():
-    """30분마다 새 버전이 올라왔는지 확인 → 화면에 [지금 업데이트] 표시."""
+    """5분마다 새 버전 확인 (화면을 다시 열 때·버전을 누를 때도 바로 확인)."""
     time.sleep(20)
     while True:
-        try:
-            tmp = fetch_bundle()
-            state["update"] = bool(tmp) and file_md5(tmp) != file_md5(INSTALLED)
-        except Exception:
-            pass
-        time.sleep(1800)
+        check_update()
+        time.sleep(300)
 
 
 def do_update():
@@ -458,6 +465,10 @@ class H(BaseHTTPRequestHandler):
             return self.send({"ok": f"임시 파일 {cleanup()}KB 정리했어요 (찾은 내역·검수 기록은 그대로)"})
         if path == "/api/reset":
             return self.send(reset_all())
+        if path == "/api/check_update":  # 화면을 열 때(2분에 한 번까지)·버전 글자를 누를 때
+            if data.get("force") or time.time() - state.get("update_checked", 0) > 120:
+                threading.Thread(target=check_update, daemon=True).start()
+            return self.send({"ok": "확인 중"})
         if path == "/api/update":
             return self.send(do_update())
         if path == "/api/quit":

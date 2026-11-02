@@ -487,7 +487,11 @@ def fetch_coords(x, y):
              ("밑동", x, y + int(0.09 * w), TAP_MS), ("몸통(다른 방식)", x, y + int(0.04 * w), 0)]
     small = lambda im: cv2.resize(im, (128, 256), interpolation=cv2.INTER_AREA).astype(np.int16)
     base, frames, diffs = small(shot0), [], []
-    for name, tx, ty, ms in tries:
+    for n_try, (name, tx, ty, ms) in enumerate(tries):
+        if n_try == 2 and VD is not None:
+            # 두 번 다 화면이 그대로면: 블룸이 포커스가 없어 터치를 무시하는 것일 수 있음 → 블룸을 다시 앞으로(포커스) 불러 재시도
+            adb("shell", f"am start --display {VD} -n {PIKMIN_PKG}/{PIKMIN_ACT}", check=False)
+            time.sleep(1.5)
         if ms:
             tap(tx, ty, ms)
         else:
@@ -502,7 +506,7 @@ def fetch_coords(x, y):
         frames.append(img)
         diffs.append(float(np.abs(small(img) - base).mean()))  # 누른 뒤 화면이 얼마나 변했나 (0 = 그대로)
         if label:
-            print(f"   이름표 뜸 (누른 자리: {name})")
+            print(f"   이름표 뜸 (누른 자리: {name}{', 블룸 다시 앞으로 부른 뒤' if n_try >= 2 and VD is not None else ''})")
             # 성공한 순간도 남겨 실패 사진과 비교할 수 있게 (왼쪽 누르기 전, 오른쪽 이름표 뜬 뒤)
             save_public("scout_label.jpg", np.hstack([annotate(shot0, [(name, 0, tx, ty)]), annotate(img, [("label", 0, *label)])]))
             break
@@ -516,6 +520,9 @@ def fetch_coords(x, y):
         verdict = "거의 그대로 → 터치가 블룸에 안 들어감" if max(diffs) < 1.5 else "화면은 바뀜 → 다른 것이 눌렸거나 지도가 밀림"
         print("   이름표를 못 찾음 → 확인용 사진 (왼쪽부터 누르기 전 · 1번 · 2번 · 3번 누른 뒤). 다음 바퀴에 다시 시도")
         print(f"   진단: 누른 뒤 화면 변화 [{changes}] → {verdict}")
+        front = re.search(r"mCurrentFocus=Window\{\S+ \S+ ([\w.]+)", adb("shell", "dumpsys window | grep mCurrentFocus", check=False))
+        print(f"   진단: 그때 폰 화면 앞에 있던 앱 = {front.group(1) if front else '알 수 없음'}"
+              + (" (블룸이 아니면, 다른 앱을 쓰는 중이라 블룸이 터치를 무시했을 수 있음)" if VD is not None else ""))
         print("   진단: " + touch_check())
         return None
     tap(*label)

@@ -1,0 +1,20 @@
+# PC 전용 도구(adb, 삼성 드라이버) - 용량이 크고 따로 받을 수 있음
+tools/
+# 테스트 스크린샷·중간 산출물
+shots/
+work/*.png
+work/png_tpl/
+work/vd/cls/
+work/vd/out/
+__pycache__/
+# 빌드할 때 만들어짐 (python work/build_bundle.py)
+scout_setup.sh
+version.txt
+v1/scout_setup.sh
+# 실행 중 생기는 기록 (폰/PC 로컬 데이터)
+found.txt
+scan.log
+*.log
+hits/
+audit/
+my_targets/

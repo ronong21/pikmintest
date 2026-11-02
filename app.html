@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#2f8f4e">
+<title>버섯 탐지기</title>
+<style>
+:root{--bg:#f3f6f1;--card:#fff;--ink:#1d2a1f;--sub:#5f6f61;--line:#dfe6dc;--accent:#2f8f4e;--accent-ink:#fff;--stop:#c9453a;--soft:#e8f3eb;--warn:#fff4dc;--warn-ink:#7a5300;--bad:#fde8e6;--bad-ink:#a3271d}
+@media (prefers-color-scheme:dark){:root{--bg:#121714;--card:#1b221d;--ink:#e6efe7;--sub:#9fb1a3;--line:#2c372f;--accent:#4cb36d;--accent-ink:#0d1a10;--stop:#e2685d;--soft:#203026;--warn:#3a3220;--warn-ink:#f1cf7a;--bad:#3b2220;--bad-ink:#f4a59d}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,"Noto Sans KR",sans-serif;padding:16px 16px 40px;max-width:640px;margin-inline:auto}
+header{display:flex;align-items:center;justify-content:space-between;margin:4px 0 12px}
+h1{font-size:22px;margin:0}
+h1 small{font-size:11px;font-weight:400;color:var(--sub);margin-left:6px;letter-spacing:0}
+h2{font-size:16px;margin:0 0 10px}
+.chip{font-size:12px;padding:4px 10px;border-radius:20px;background:var(--soft);color:var(--accent);font-weight:700}
+.chip.off{background:var(--bad);color:var(--bad-ink)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px}
+.status{display:flex;align-items:center;gap:10px}
+.dot{width:12px;height:12px;border-radius:50%;background:var(--sub);flex:none}
+.dot.on{background:var(--accent);box-shadow:0 0 0 4px var(--soft);animation:pulse 1.6s infinite}
+@keyframes pulse{50%{box-shadow:0 0 0 8px transparent}}
+.sub{color:var(--sub);font-size:13px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:12px}
+.stat{background:var(--bg);border-radius:12px;padding:8px;text-align:center}
+.stat b{display:block;font-size:22px;font-variant-numeric:tabular-nums}
+.targets{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+.t{position:relative;border:2px solid var(--line);border-radius:12px;padding:8px;text-align:center;cursor:pointer;background:var(--card)}
+.t.sel{border-color:var(--accent);background:var(--soft)}
+.t img{width:100%;height:56px;object-fit:contain;pointer-events:none}
+.t .x{position:absolute;top:0;right:2px;color:var(--sub);font-size:20px;border:0;background:none;padding:2px 8px}
+.row{display:flex;gap:8px;align-items:center}
+button{font:inherit;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:10px 14px;cursor:pointer}
+.big{flex:1;padding:16px;font-size:17px;font-weight:700;border:0}
+.go{background:var(--accent);color:var(--accent-ink);border:0}
+.halt{background:var(--stop);color:#fff}
+button:disabled{opacity:.4}
+.switch{display:flex;align-items:center;gap:10px;margin:12px 0}
+.switch input{width:22px;height:22px;accent-color:var(--accent);flex:none}
+.set{display:grid;grid-template-columns:1fr auto;gap:8px 12px;align-items:center;margin:10px 0 4px}
+.files label{display:block;margin:10px 0;padding:10px;border:1px dashed var(--line);border-radius:12px}
+.files input,input[type=file]{display:block;max-width:100%;margin-top:6px;font-size:13px}
+select{font:inherit;padding:8px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+pre{background:var(--bg);border-radius:10px;padding:10px;font-size:12px;max-height:240px;overflow:auto;white-space:pre-wrap;margin:8px 0 0}
+.shot{width:100%;border-radius:12px;border:1px solid var(--line);display:block;cursor:zoom-in}
+.feed{list-style:none;margin:10px 0 0;padding:0;font-size:14px}
+.feed li{padding:6px 0 6px 12px;border-left:3px solid var(--line);margin-bottom:4px}
+.feed li.f-good{border-color:var(--accent);font-weight:700}
+.feed li.f-warn{border-color:#e0a100}
+.feed li.f-bad{border-color:var(--stop);color:var(--bad-ink)}
+.hist{list-style:none;margin:0;padding:0}
+.hist li{border-top:1px solid var(--line);padding:10px 0;display:flex;gap:6px;align-items:center}
+.hist li:first-child{border-top:0}
+.hist .info{flex:1;min-width:0}
+.hist .c{font-family:ui-monospace,monospace;font-size:13px;word-break:break-all}
+.hist button{padding:8px 10px}
+.del{border:0;background:none;color:var(--sub);font-size:18px;padding:4px 6px!important}
+.photos{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.photos a{color:inherit;text-decoration:none;font-size:13px;cursor:zoom-in}
+.photos img{width:100%;border-radius:10px;border:1px solid var(--line)}
+.warn{background:var(--warn);color:var(--warn-ink);border-radius:12px;padding:10px 12px;font-size:13px;margin-top:10px}
+.bad{background:var(--bad);color:var(--bad-ink);border-radius:12px;padding:10px 12px;font-size:13px;margin-top:10px}
+details summary{cursor:pointer;font-weight:700}
+ol,ul{padding-left:20px;margin:8px 0}
+canvas{width:100%;border-radius:10px;touch-action:none;display:block;margin:8px 0;background:var(--bg)}
+input[type=text]{font:inherit;width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:20px;font-size:14px;opacity:0;transition:.2s;pointer-events:none;max-width:90%;z-index:10}
+.toast.show{opacity:1}
+#lb{position:fixed;inset:0;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;padding:12px;z-index:9}
+#lb img{max-width:100%;max-height:100%;border-radius:10px}
+</style>
+</head>
+<body>
+<header><h1>버섯 탐지기 <small id="ver"></small></h1><span class="chip" id="shz">Shizuku 확인 중</span></header>
+
+<div class="card">
+  <div class="status"><div class="dot" id="dot"></div><div><b id="stTitle">대기 중</b><div class="sub" id="stSub">찾을 버섯을 고르고 [찾기 시작]</div></div></div>
+  <div class="stats" id="stats" hidden>
+    <div class="stat"><b id="sCells">0</b><span class="sub">확인한 칸</span></div>
+    <div class="stat"><b id="sCand">0</b><span class="sub">버섯 후보</span></div>
+    <div class="stat"><b id="sMiss">0</b><span class="sub">이름표 놓침</span></div>
+    <div class="stat"><b id="sFound">0</b><span class="sub">알림 보냄</span></div>
+  </div>
+  <div class="warn" id="updBar" hidden><b>새 버전이 있어요.</b> 누르면 설치하고 앱이 다시 켜져요. 찾는 중이면 업데이트 뒤 이어서 찾아요.
+    <button id="updBtn" class="go" style="margin-top:6px;width:100%">지금 업데이트</button></div>
+  <div class="bad" id="offBar" hidden style="font-size:15px"><b>탐지기 앱이 꺼져 있어요.</b><br>홈 화면의 <b>[버섯찾기]</b> 아이콘을 눌러 다시 켜세요. (이 화면의 버튼은 앱이 켜져야 동작해요)</div>
+  <div class="bad" id="crashBar" hidden>탐지기가 <b>오류로 멈췄어요.</b> [진행 기록]의 마지막 줄을 캡처해 보내 주세요. 다시 [찾기 시작]해도 돼요.</div>
+  <div class="bad" id="shzBar" hidden><b>Shizuku 연결이 안 돼요.</b> 폰을 재부팅했다면 와이파이 연결 → Shizuku 앱 [시작] 후 이 화면으로 돌아오세요.</div>
+  <div class="warn" id="nolabelBar" hidden>이번 탐색에서 <b>이름표를 못 찾은 순간</b>이 있어요. 사진을 캡처해서 보내 주세요.
+    <button id="nolabelBtn" style="margin-top:6px;width:100%">그 사진 보기</button></div>
+</div>
+
+<div class="card">
+  <h2>찾을 버섯</h2>
+  <div class="targets" id="targets"></div>
+  <label class="switch"><input type="checkbox" id="bg" checked><span><b>백그라운드</b> <span class="sub">— 블룸이 안 보이는 화면에서 돌아요. 폰을 쓰거나 화면을 꺼도 됨. 끄면 블룸을 폰 화면에 띄워 보면서 찾아요.</span></span></label>
+  <details>
+    <summary class="sub">찾기 설정</summary>
+    <div class="set">
+      <span>인원 제한 <span class="sub">(이 인원 이하만 알림)</span></span>
+      <select id="max_people"><option value="4">4명 이하</option><option value="3">3명 이하</option><option value="2">2명 이하</option><option value="1">1명 이하</option><option value="0">아무도 없는 것만</option></select>
+      <span>한 바퀴에 볼 칸 수 <span class="sub">(넓을수록 오래)</span></span>
+      <select id="cells"><option value="20">20칸 (가까이)</option><option value="40" selected>40칸 (기본)</option><option value="80">80칸 (넓게)</option></select>
+      <span>자동으로 멈추기 <span class="sub">(배터리 아끼기)</span></span>
+      <select id="max_minutes"><option value="0" selected>계속 (직접 중지)</option><option value="30">30분 뒤</option><option value="60">1시간 뒤</option><option value="120">2시간 뒤</option><option value="240">4시간 뒤</option></select>
+      <span>넓게 보기 <span class="sub">(광역 지도 최대 줌아웃 → 한 화면에 2~3배 넓게)</span></span>
+      <select id="zoom"><option value="1" selected>켜기 (기본)</option><option value="0">끄기</option></select>
+      <span>후보 검수 <span class="sub">(거대 버섯 찾을 때 조건 밖 후보도 사진+좌표 30장, 알림 없음)</span></span>
+      <select id="audit_set"><option value="1" selected>켜기</option><option value="0">끄기</option></select>
+      <span>발열 줄이기 <span class="sub">(백그라운드 화질. 낮추면 덜 뜨겁지만 인원 숫자를 잘못 읽을 수 있음)</span></span>
+      <select id="vd_scale"><option value="100" selected>보통 화질 (기본)</option><option value="80">조금 낮게</option><option value="65">낮게 (가장 시원)</option></select>
+      <span>버섯 누르는 시간 <span class="sub">(블룸은 짧게 눌렀다 떼야 이름표가 떠요)</span></span>
+      <select id="tap_ms"><option value="100" selected>짧게 (기본)</option><option value="60">아주 짧게</option><option value="200">조금 길게</option></select>
+    </div>
+  </details>
+  <div class="row" style="margin-top:12px">
+    <button class="big go" id="startBtn">찾기 시작</button>
+    <button class="big halt" id="stopBtn" disabled>중지</button>
+  </div>
+  <p class="sub">버섯 후보 = 찾는 버섯을 발견해 인원까지 확인한 수(인원 초과·이름표 놓침 포함), 알림 보냄 = 조건에 맞아 좌표까지 얻은 수.<br>찾으면 폰 알림 + 아래 [찾은 내역]에 쌓여요. 이 화면을 닫아도 계속 찾아요.</p>
+</div>
+
+<div class="card" id="liveCard" hidden>
+  <h2>진행 상황</h2>
+  <img class="shot" id="live" alt="지금 블룸 화면" title="누르면 크게">
+  <ul class="feed" id="feed"></ul>
+  <details><summary class="sub">자세한 기록 (오류 보낼 때)</summary><pre id="log"></pre></details>
+</div>
+
+<div class="card">
+  <div class="row" style="justify-content:space-between"><h2 style="margin:0">찾은 내역</h2><button id="clearHist" class="sub" style="padding:6px 10px">전체 지우기</button></div>
+  <ul class="hist" id="hist" style="margin-top:8px"><li class="sub">아직 없어요</li></ul>
+</div>
+
+<div class="card" id="auditCard" hidden>
+  <h2>거대 버섯 후보 검수 <span class="sub">(최대 30장 · 알림·카운트 없음)</span></h2>
+  <p class="sub" style="margin:0 0 8px">거대 버섯을 잘 걸러 내는지 보려고 조건에 안 맞는 후보도 사진과 좌표를 남겨요. 빨간 원 = 탐지기가 고른 버섯.</p>
+  <ul class="hist" id="audit"></ul>
+</div>
+
+<div class="card">
+  <div class="row" style="justify-content:space-between"><h2 style="margin:0">확인용 사진</h2><button id="clearPhotos" class="sub" style="padding:6px 10px">전체 지우기</button></div>
+  <p class="sub" style="margin:4px 0 8px">누르면 크게 보여요. 찾는 중에도 볼 수 있어요.</p>
+  <div class="photos" id="photos"><span class="sub">아직 없어요</span></div>
+</div>
+
+<div class="card">
+  <details>
+    <summary>새 버섯 등록 (다음 달 이벤트 버섯 등)</summary>
+    <ol class="sub">
+      <li>블룸 <b>광역 지도</b>(평소 확대 그대로)에서 새 버섯을 <b>눌러 검은 이름표</b>가 뜨게 하고 <b>스크린샷</b></li>
+      <li>크기별로 한 장씩: <b>거대</b> 한 장, <b>중형</b> 한 장 (소형도 있으면 소형 한 장)</li>
+      <li>아래에 버섯 이름(크기 빼고, 예: <b>반짝이는 버섯</b>) 적고, 크기 칸마다 사진 고르고 [자동 등록]</li>
+    </ol>
+    <img class="shot" src="/example.jpg" alt="등록 예시" data-big="/example.jpg">
+    <p class="sub">예시: 이렇게 이름표가 보이는 화면이면 돼요. <b style="color:#e0a100">노란 테두리 = 찾은 이름표</b>, <b style="color:#e53935">빨간 네모 = 자동으로 잘라 등록하는 버섯</b>. 자르거나 테두리 칠 필요 없어요.</p>
+    <input type="text" id="abase" placeholder="버섯 이름 (예: 반짝이는 버섯)">
+    <div class="files">
+      <label><b>거대</b> 이름표 화면<input type="file" id="f_거대" accept="image/*"></label>
+      <label><b>중형</b> 이름표 화면<input type="file" id="f_중형" accept="image/*"></label>
+      <label><b>소형</b> 이름표 화면 <span class="sub">(있으면)</span><input type="file" id="f_소형" accept="image/*"></label>
+    </div>
+    <div class="row" style="margin-top:8px"><button id="autoBtn" class="go">자동 등록</button><span class="sub" id="autoInfo"></span></div>
+    <div class="photos" id="autoPrev" style="margin-top:8px"></div>
+    <div id="pointBox" hidden>
+      <div class="warn" id="pointMsg"></div>
+      <canvas id="pcv" style="cursor:crosshair"></canvas>
+    </div>
+    <details style="margin-top:12px">
+      <summary class="sub">자동이 안 될 때: 직접 네모로 고르기</summary>
+      <p class="sub">이름표 없는 스크린샷에서 버섯 <b>갓 부분만</b> 손가락으로 끌어 네모로 감싸고, 이름(예: 거대 반짝이는 버섯) 적고 [등록].</p>
+      <input type="file" id="file" accept="image/*">
+      <canvas id="cv" hidden></canvas>
+      <input type="text" id="tname" placeholder="버섯 이름 (예: 거대 반짝이는 버섯)" list="tnames" style="margin-top:8px">
+      <datalist id="tnames"></datalist>
+      <div class="row" style="margin-top:8px"><button id="regBtn" class="go">등록</button><span class="sub" id="regInfo"></span></div>
+    </details>
+  </details>
+</div>
+
+<div class="card">
+  <details>
+    <summary>주의할 점</summary>
+    <ul class="sub">
+      <li>백그라운드로 찾는 동안 <b>블룸 앱을 직접 열지 마세요</b>. 서로 화면을 뺏어 엉켜요. 블룸을 하려면 먼저 [중지].</li>
+      <li>블룸 GPS 등으로 위치를 바꾸면 그 주변을 찾게 돼요.</li>
+      <li>폰을 <b>재부팅</b>하면 Shizuku 를 다시 켜야 해요 (와이파이 연결 → Shizuku 앱 [시작]). 위 오른쪽 표시가 빨갛게 돼요.</li>
+      <li>오래 돌릴 땐 <b>충전기</b>를 꽂아 두세요. 배터리 15% 이하(충전 안 함)면 알아서 멈춰요.</li>
+      <li>이 화면을 닫아도 계속 찾아요. 다시 보려면 홈 화면 [버섯찾기].</li>
+      <li>Termux 창을 '닫기(Exit)'하면 탐지기가 꺼져요. 홈 버튼으로 나가는 건 괜찮아요.</li>
+    </ul>
+  </details>
+</div>
+
+<button id="cleanBtn" style="width:100%;margin-bottom:8px">임시 파일 정리 (확인용 사진·기록 사진 지우기, 찾은 내역·검수는 그대로)</button>
+<button id="resetBtn" style="width:100%;margin-bottom:8px">리셋 — 찾은 내역·사진·검수 모두 지우고 처음부터</button>
+<button id="quitBtn" style="width:100%">모두 끄기 (블룸·탐지기 끄기, Shizuku 는 켜 둠)</button>
+
+<div class="toast" id="toast"></div>
+<div id="lb" hidden><img id="lbImg" alt=""></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const SETS = ["max_people", "cells", "tap_ms", "max_minutes", "vd_scale", "zoom", "audit_set"];
+let sel = null, st = null, histKey = "", targetsKey = "";
+const store = {get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } },
+               set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} }};
+const toast = m => { const t = $("toast"); t.textContent = m; t.classList.add("show"); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove("show"), 2600); };
+const OLD = "앱이 예전 버전이에요. 홈 화면 [버섯찾기]를 다시 눌러 주세요";
+const post = (u, d = {}) => fetch(u, {method: "POST", body: JSON.stringify(d)})
+  .then(r => r.status === 404 ? {error: OLD} : r.json()).catch(() => ({error: "탐지기와 연결이 끊겼어요"}));
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const ago = t => { const m = Math.round((Date.now() - new Date(t.replace(" ", "T"))) / 60000);
+  return m < 1 ? "방금" : m < 60 ? `${m}분 전` : m < 1440 ? `${Math.floor(m / 60)}시간 전` : `${Math.floor(m / 1440)}일 전`; };
+const zoom = src => { $("lbImg").src = src; $("lb").hidden = false; };
+
+SETS.forEach(k => { const v = store.get("set_" + k); if (v) $(k).value = v; $(k).onchange = () => store.set("set_" + k, $(k).value); });
+const bgSaved = store.get("bg"); if (bgSaved !== null) $("bg").checked = bgSaved === "1";
+$("bg").onchange = () => store.set("bg", $("bg").checked ? "1" : "0");
+
+function renderTargets(list) {
+  sel = (st && st.running && st.target) || sel || store.get("target");
+  if (!list.some(t => t.key === sel)) sel = (list[0] || {}).key;
+  const key = JSON.stringify(list) + sel + (st && st.running);
+  if (key === targetsKey) return;
+  targetsKey = key;
+  $("targets").innerHTML = list.map(t => `<div class="t ${t.key === sel ? "sel" : ""}" data-k="${esc(t.key)}">
+      ${t.mine ? `<button class="x" data-del="${esc(t.key)}" title="지우기">×</button>` : ""}
+      <img src="/tpl/${esc(t.key)}" alt=""><div>${esc(t.name)}</div></div>`).join("");
+  $("tnames").innerHTML = list.filter(t => t.mine).map(t => `<option value="${esc(t.name)}">`).join("");
+}
+$("targets").onclick = e => {
+  const del = e.target.dataset.del;
+  if (del) { if (confirm("이 버섯을 목록에서 지울까요?")) post("/api/delete", {key: del}).then(r => { toast(r.ok || r.error); poll(); }); return; }
+  const c = e.target.closest(".t");
+  if (!c) return;
+  if (st && st.running) return toast("찾는 중에는 바꿀 수 없어요. [중지] 후 바꾸세요");
+  sel = c.dataset.k; store.set("target", sel); targetsKey = ""; renderTargets(st.targets);
+};
+
+// 진행 기록(원본 로그)을 알아보기 쉬운 문장으로
+function feedOf(log, want) {
+  const out = [];
+  let cells = 0, cand = 0, found = 0, miss = 0;
+  for (const l of log) {
+    let m;
+    if ((m = l.match(/^\[(\d+)-(\d+)\] 칸\((-?\d+), (-?\d+)\) 바다 (\d+)% (.*)$/))) {
+      cells++;
+      if (want && m[6].includes(want)) out.push(["", `${m[1]}바퀴 ${m[2]}번째 칸에서 버섯 후보 발견`]);
+      continue;
+    }
+    if (l.includes("인원:")) { cand++; const p = l.match(/인원: (\S+)/)[1]; out.push(["", p === "읽기" ? "인원 수 읽기 실패 → 건너뜀" : `인원 ${p}명 확인`]); }
+    else if (l.startsWith("발견!")) { found++; out.push(["good", "좌표 찾음! 알림 보냄 · " + l.replace("발견! ", "").split(" (")[0]]); }
+    else if (l.includes("이름표를 못 찾음") && ++miss) out.push(["warn", "버섯을 3번 눌러도 이름표가 안 떴어요 → 다음 바퀴에 다시 시도"]);
+    else if (l.includes("진단:")) out.push(["warn", l.trim()]);
+    else if (l.includes("이름표 뜸")) out.push(["", l.trim()]);
+    else if (l.includes("가운데로 옮겨서")) out.push(["", "화면 가장자리 버섯 → 가운데로 옮겨서 확인"]);
+    else if (l.includes("옮긴 뒤 다시 못 찾음")) out.push(["warn", "가운데로 옮긴 뒤 버섯을 다시 못 찾음"]);
+    else if (l.includes("이미 보낸 버섯") || l.includes("이미 있어서")) out.push(["", "이미 알린 버섯이라 건너뜀"]);
+    else if (l.includes("새 좌표를 못 읽음") || l.includes("버튼을 못 찾음")) out.push(["warn", l.trim()]);
+    else if (l.includes("줌아웃")) out.push(["", "광역 지도를 최대로 줌아웃 (더 넓게)"]);
+    else if (l.includes("블룸 화면 넘기기")) out.push(["", "블룸 첫 화면 넘기는 중 (" + l.split(": ")[1] + ")"]);
+    else if (l.includes("광역 지도로 못 들어갔")) out.push(["bad", "광역 지도로 못 들어갔어요 (확인용 사진)"]);
+    else if (l.includes("광역 지도가 아니라서")) out.push(["warn", "광역 지도가 풀려서 다시 들어감"]);
+    else if (/^\[\d\/4\]/.test(l)) out.push(["", "준비 " + l]);
+    else if (l.includes("이번 판")) out.push(["", "한 바퀴 다 봤어요 → 잠깐 쉬고 더 바깥쪽 새 지역으로 (본 곳은 다시 안 봄)"]);
+    else if (l.includes("더 갈 새 지역이 없어서")) out.push(["", "더 갈 새 지역이 없어서 처음 자리부터 다시"]);
+    else if (l.includes("까맣게")) out.push(["warn", "블룸 화면이 까맣게 나와서 블룸을 다시 띄움"]);
+    else if (l.includes("광역 지도로 다시 들어가 봅니다")) out.push(["warn", "지도가 안 움직여서 광역 지도로 다시 들어가 봄"]);
+    else if (l.includes("검수 기록")) out.push(["", l.trim()]);
+    else if (l.includes("배터리") || l.includes("6번") || l.includes("멈춥니다")) out.push(["bad", l.trim()]);
+    else if (l.includes("중지했습니다")) out.push(["", "중지했어요"]);
+    else if (l.includes("자동으로 다시 시작")) out.push(["warn", l.trim()]);
+    else if (l.includes("정한 시간이 지나서")) out.push(["", "정한 시간이 끝나 자동으로 멈췄어요"]);
+    else if (/Error|Traceback|실패/.test(l)) out.push(["bad", l.trim()]);
+  }
+  return {feed: out.slice(-10).reverse(), cells, cand, found, miss};
+}
+
+function render() {
+  const name = (st.targets.find(t => t.key === st.target) || {}).name || "";
+  const f = feedOf(st.log, st.target);
+  $("dot").classList.toggle("on", st.running);
+  $("stTitle").textContent = st.running ? `찾는 중: ${name}` : (st.started ? `멈춤 (마지막: ${name})` : "대기 중");
+  $("stSub").textContent = st.running
+    ? `${st.bg ? "백그라운드" : "블룸 화면 보면서"} · ${Math.max(0, Math.round((Date.now() / 1000 - st.started) / 60))}분째`
+    : "찾을 버섯을 고르고 [찾기 시작]";
+  $("stats").hidden = !st.started;
+  $("sCells").textContent = f.cells; $("sCand").textContent = f.cand; $("sFound").textContent = f.found; $("sMiss").textContent = f.miss;
+  $("crashBar").hidden = !st.crashed;
+  $("updBar").hidden = !st.update;
+  $("shz").textContent = st.shizuku === false ? "Shizuku 꺼짐" : st.shizuku ? "Shizuku 연결됨" : "Shizuku 확인 중";
+  $("shz").classList.toggle("off", st.shizuku === false);
+  $("shzBar").hidden = st.shizuku !== false;
+  $("startBtn").disabled = st.running; $("stopBtn").disabled = !st.running;
+  $("bg").disabled = st.running; SETS.forEach(k => $(k).disabled = st.running);
+  $("liveCard").hidden = !(st.running || st.started || st.photos.now);
+  $("live").hidden = !st.photos.now;
+  if (st.photos.now && !$("live").src.endsWith("t=" + st.photos.now)) $("live").src = `/photo/now?t=${st.photos.now}`;
+  $("feed").innerHTML = f.feed.map(([c, t]) => `<li class="${c && "f-" + c}">${esc(t)}</li>`).join("") || `<li class="sub">기록이 여기에 보여요</li>`;
+  $("log").textContent = st.log.slice(-60).join("\n");
+  const hk = JSON.stringify(st.history);
+  if (hk !== histKey) {
+    histKey = hk;
+    $("hist").innerHTML = st.history.length ? st.history.map(h => `<li><div class="info">
+        <div><b>${esc(h.name || "버섯")}</b> · 인원 ${h.people ?? "?"}명 <span class="sub">${ago(h.time)}</span></div>
+        <div class="c">${esc(h.lat)},${esc(h.lng)}</div></div>
+        <button data-copy="${esc(h.lat)},${esc(h.lng)}">복사</button>
+        <button data-share="${esc(h.lat)},${esc(h.lng)}" data-name="${esc(h.name || "버섯")}" data-people="${h.people ?? "?"}">공유</button>
+        <button class="go" data-map="${esc(h.lat)},${esc(h.lng)}">지도</button>
+        <button class="del" data-hdel="${esc(h.lat)},${esc(h.lng)}" title="지우기">×</button></li>`).join("")
+      : `<li class="sub">아직 없어요</li>`;
+  }
+  const ak = JSON.stringify(st.audit);
+  if (ak !== render.ak) {
+    render.ak = ak;
+    $("auditCard").hidden = !st.audit.length;
+    $("audit").innerHTML = st.audit.map(a => `<li style="align-items:flex-start">
+        <img src="/audit/${esc(a.img)}" data-big="/audit/${esc(a.img)}" style="width:96px;border-radius:8px;cursor:zoom-in" alt="">
+        <div class="info"><div><b>${esc(a.status)}</b> · 인원 ${a.people ?? "?"}명 <span class="sub">${ago(a.time)}</span></div>
+        <div class="c">${a.lat ? esc(a.lat) + "," + esc(a.lng) : "좌표 없음 (이름표 놓침)"}</div>
+        ${a.lat ? `<div class="row" style="margin-top:6px"><button data-copy="${esc(a.lat)},${esc(a.lng)}">복사</button>
+        <button class="go" data-map="${esc(a.lat)},${esc(a.lng)}">지도</button></div>` : ""}</div></li>`).join("");
+  }
+  const labels = {now: "지금 블룸 화면", label: "이름표 찾은 순간 (왼쪽 누르기 전 · 오른쪽 뜬 뒤)", nolabel: "이름표 못 찾은 순간 (왼쪽 누르기 전 · 오른쪽 누른 뒤)", stuck: "지도가 멈춘 순간"};
+  const ph = Object.entries(st.photos);
+  $("photos").innerHTML = ph.length ? ph.map(([k, t]) => `<a data-big="/photo/${k}?t=${t}">
+      <img src="/photo/${k}?t=${t}" alt=""><div>${labels[k]}<br><span class="sub">${new Date(t * 1000).toLocaleString("ko-KR")}</span></div></a>`).join("")
+    : `<span class="sub">아직 없어요</span>`;
+  $("nolabelBar").hidden = !(st.photos.nolabel && st.started && st.photos.nolabel >= st.started);
+}
+$("hist").onclick = e => {
+  const d = e.target.dataset;
+  if (d.copy) navigator.clipboard?.writeText(d.copy).then(() => toast("좌표를 복사했어요"), () => toast(d.copy));
+  if (d.share) { const [lat, lng] = d.share.split(","); post("/api/share", {lat, lng, name: d.name, people: d.people}).then(r => toast(r.ok || r.error)); }
+  if (d.map) { const [lat, lng] = d.map.split(","); post("/api/open_map", {lat, lng}).then(r => toast(r.ok || r.error)); }
+  if (d.hdel && confirm("이 내역을 지울까요?")) { const [lat, lng] = d.hdel.split(","); post("/api/history_delete", {lat, lng}).then(r => { toast(r.ok || r.error); poll(); }); }
+};
+$("updBtn").onclick = () => { $("updBtn").disabled = true; $("updBtn").textContent = "설치하는 중... (1분쯤)";
+  post("/api/update").then(r => { toast(r.ok || r.error); if (r.error) { $("updBtn").disabled = false; $("updBtn").textContent = "지금 업데이트"; } }); };
+$("clearPhotos").onclick = () => { if (confirm("확인용 사진을 전부 지울까요?")) post("/api/photos_clear").then(r => { toast(r.ok || r.error); poll(); }); };
+$("audit").onclick = e => $("hist").onclick(e);  // 복사·지도 버튼은 찾은 내역과 같게
+$("cleanBtn").onclick = () => post("/api/cleanup").then(r => { toast(r.ok || r.error); poll(); });
+$("resetBtn").onclick = () => { if (confirm("찾기를 멈추고 찾은 내역·확인용 사진·검수 기록을 모두 지울까요? 다시 [찾기 시작]하면 처음 자리부터 새로 돌아요."))
+  post("/api/reset").then(r => { toast(r.ok || r.error); histKey = ""; render.ak = ""; poll(); }); };
+$("clearHist").onclick = () => { if (confirm("찾은 내역을 전부 지울까요?")) post("/api/history_delete", {}).then(r => { toast(r.ok || r.error); histKey = ""; poll(); }); };
+
+function poll() {
+  return fetch("/api/status").then(r => r.json()).then(s => {
+    poll.fails = 0;
+    if (poll.ver && s.version && s.version !== poll.ver) return location.reload();  // 앱이 새 버전으로 바뀜 → 화면도 새로
+    poll.ver = s.version;
+    $("ver").textContent = s.build || "";
+    st = s; $("offBar").hidden = true; ["clearHist", "clearPhotos", "regBtn", "quitBtn", "resetBtn"].forEach(id => $(id).disabled = false);
+    renderTargets(s.targets); render();
+  }).catch(() => {
+    // 브라우저를 내려 두면 폰이 통신을 잠깐 막아 실패할 수 있음 → 화면이 보일 때 3번 연속 실패해야 '꺼짐'
+    if (document.hidden) return;
+    poll.fails = (poll.fails || 0) + 1;
+    if (poll.fails >= 3) { $("dot").classList.remove("on"); offline(true); }
+  });
+}
+$("startBtn").onclick = () => {
+  if (!sel) return toast("버섯을 골라 주세요");
+  if (st && st.shizuku === false) return toast("Shizuku 가 꺼져 있어요. 먼저 켜 주세요");
+  const opts = Object.fromEntries(SETS.map(k => [k === "audit_set" ? "audit" : k, +$(k).value]));
+  $("startBtn").disabled = true;
+  post("/api/start", {target: sel, bg: $("bg").checked, opts}).then(r => { toast(r.ok); poll(); });
+};
+$("stopBtn").onclick = () => { $("stopBtn").disabled = true; toast("멈추는 중... (최대 20초)"); post("/api/stop").then(r => { toast(r.ok); poll(); }); };
+$("quitBtn").onclick = () => { if (confirm("블룸과 탐지기를 모두 끌까요? (Shizuku 는 켜 둡니다)"))
+  post("/api/quit").then(r => { toast(r.ok || r.error); offline(true); }); };
+function offline(on) {  // 앱 서버가 꺼졌을 때: 버튼 잠그고 다시 켜는 법 안내
+  $("offBar").hidden = !on;
+  if (!on) return;
+  $("dot").classList.remove("on");
+  $("stTitle").textContent = "탐지기 앱이 꺼져 있어요"; $("stSub").textContent = "홈 화면 [버섯찾기]를 눌러 다시 켜세요";
+  ["startBtn", "stopBtn", "clearHist", "clearPhotos", "regBtn", "quitBtn", "resetBtn"].forEach(id => $(id).disabled = true);
+}
+document.addEventListener("click", e => {
+  const big = e.target.closest("[data-big]")?.dataset.big || (e.target.id === "live" && e.target.src);
+  if (big) zoom(big);
+});
+$("lb").onclick = () => { $("lb").hidden = true; };
+$("nolabelBtn").onclick = () => st.photos.nolabel && zoom(`/photo/nolabel?t=${st.photos.nolabel}`);
+
+// 새 버섯 자동 등록: 크기별 이름표 화면 → 서버가 이름표 아래 버섯을 잘라 등록
+const reg = {items: [], base: ""};  // 마지막 자동 등록에 쓴 사진·이름
+const readFile = f => new Promise(res => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.readAsDataURL(f); });
+$("autoBtn").onclick = async () => {
+  const base = $("abase").value.trim();
+  if (!base) return toast("버섯 이름을 적어 주세요 (예: 반짝이는 버섯)");
+  const items = [];
+  for (const size of ["거대", "중형", "소형"]) { const f = $("f_" + size).files[0]; if (f) items.push({size, image: await readFile(f)}); }
+  reg.items = items; reg.base = base;
+  if (!items.length) return toast("크기 칸에 이름표 화면 사진을 골라 주세요");
+  $("autoBtn").disabled = true; $("autoInfo").textContent = "인식하는 중...";
+  const r = await post("/api/auto_register", {base, items});
+  $("autoBtn").disabled = false;
+  $("autoInfo").textContent = [r.ok, r.error].filter(Boolean).join(" / ");
+  $("autoPrev").innerHTML = (r.previews || []).map(p => `<div><img src="${p.img}" alt=""><div class="sub">${esc(p.name)} — 이 부분으로 찾아요</div></div>`).join("");
+  pointQueue = (r.need_point || []).slice();
+  nextPoint();
+  if (r.ok) { targetsKey = ""; poll(); }
+  if (r.ok || r.error) toast(r.error ? r.error : r.ok);
+};
+// 이름표가 화면 끝에 잘린 사진: 사진에서 버섯을 한 번 누르면 그 자리로 등록
+let pointQueue = [], pointItem = null, pointImg = null;
+function nextPoint() {
+  const size = pointQueue.shift();
+  pointItem = size && reg.items.find(i => i.size === size);
+  $("pointBox").hidden = !pointItem;
+  if (!pointItem) { ["거대", "중형", "소형"].forEach(s => $("f_" + s).value = ""); return; }
+  $("pointMsg").innerHTML = `<b>${size}</b> 사진은 이름표가 화면 끝에 잘려서 버섯 위치를 몰라요. 아래 사진에서 <b>그 버섯을 한 번 눌러</b> 주세요.`;
+  pointImg = new Image();
+  pointImg.onload = () => { const c = $("pcv"); c.width = pointImg.naturalWidth; c.height = pointImg.naturalHeight; c.getContext("2d").drawImage(pointImg, 0, 0); $("pointBox").scrollIntoView({behavior: "smooth"}); };
+  pointImg.src = pointItem.image;
+}
+$("pcv").onclick = e => {
+  if (!pointItem) return;
+  const c = $("pcv"), r = c.getBoundingClientRect();
+  const x = (e.clientX - r.left) * c.width / r.width, y = (e.clientY - r.top) * c.height / r.height;
+  post("/api/register_point", {size: pointItem.size, base: reg.base, image: pointItem.image, x, y}).then(res => {
+    toast(res.ok || res.error);
+    if (res.ok) { $("autoPrev").insertAdjacentHTML("beforeend", `<div><img src="${res.preview.img}" alt=""><div class="sub">${esc(res.preview.name)} — 이 부분으로 찾아요</div></div>`); targetsKey = ""; poll(); nextPoint(); }
+  });
+};
+
+// 직접 등록: 스크린샷 위에서 끌어 네모 고르기
+let img = null, dataUrl = "", box = null, drag = null;
+const cv = $("cv"), ctx = cv.getContext("2d");
+$("file").onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => { dataUrl = rd.result; img = new Image(); img.onload = () => { cv.width = img.naturalWidth; cv.height = img.naturalHeight; cv.hidden = false; box = null; draw(); $("regInfo").textContent = "버섯 갓 부분을 끌어서 네모로"; }; img.src = dataUrl; };
+  rd.readAsDataURL(f);
+};
+function draw() {
+  ctx.drawImage(img, 0, 0);
+  if (box) { ctx.lineWidth = Math.max(3, cv.width / 250); ctx.strokeStyle = "#ff3b30"; ctx.strokeRect(box.x, box.y, box.w, box.h); }
+}
+const pt = e => { const r = cv.getBoundingClientRect(); return {x: (e.clientX - r.left) * cv.width / r.width, y: (e.clientY - r.top) * cv.height / r.height}; };
+cv.onpointerdown = e => { drag = pt(e); cv.setPointerCapture(e.pointerId); };
+cv.onpointermove = e => { if (!drag) return; const p = pt(e);
+  box = {x: Math.min(p.x, drag.x), y: Math.min(p.y, drag.y), w: Math.abs(p.x - drag.x), h: Math.abs(p.y - drag.y)}; draw(); };
+cv.onpointerup = () => { drag = null; if (box) $("regInfo").textContent = `${Math.round(box.w)}×${Math.round(box.h)} 선택됨`; };
+$("regBtn").onclick = () => {
+  if (!img) return toast("스크린샷을 먼저 골라 주세요");
+  if (!box || box.w < 10) return toast("버섯을 손가락으로 끌어서 네모로 골라 주세요");
+  post("/api/register", {image: dataUrl, box: [box.x, box.y, box.w, box.h], name: $("tname").value})
+    .then(r => { toast(r.ok || r.error); if (r.ok) { sel = r.key.replace(/_\d+$/, ""); store.set("target", sel); targetsKey = ""; box = null; cv.hidden = true; $("file").value = ""; $("regInfo").textContent = ""; poll(); } });
+};
+
+// 사진이 깨지면(쓰는 중·업데이트 중) 1초 뒤 다시 불러오기, 3번까지
+document.addEventListener("error", e => {
+  const im = e.target;
+  if (im.tagName !== "IMG" || im.src.startsWith("data:") || +(im.dataset.retry || 0) >= 3) return;
+  im.dataset.retry = +(im.dataset.retry || 0) + 1;
+  setTimeout(() => { const base = im.src.replace(/[?&]r=\d+/, ""); im.src = base + (base.includes("?") ? "&" : "?") + "r=" + Date.now(); }, 1000);
+}, true);
+document.addEventListener("load", e => { if (e.target.tagName === "IMG") delete e.target.dataset.retry; }, true);
+poll(); setInterval(poll, 2500);
+// 브라우저를 내렸다가 다시 열면 기다리지 않고 바로 새로 불러오기
+document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
+window.addEventListener("focus", () => poll());
+window.addEventListener("pageshow", () => poll());
+</script>
+</body>
+</html>

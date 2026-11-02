@@ -481,11 +481,12 @@ def fetch_coords(x, y):
     before = map_queries()  # 그래도 남아 있는 예전 주소 (최근 앱 기록 등)
     label, shot0 = None, screencap()  # 누르기 직전 화면 (실패하면 누른 뒤 화면과 나란히 저장)
     w = shot0.shape[1]
-    # 버섯의 '눌리는 자리'는 보이는 갓이 아니라 밑동(땅에 닿은 곳)일 수 있다 → 갓 → 조금 아래 → 밑동,
-    # 마지막은 2초 쉬고 손가락 내림/올림만 따로 보내는 방식으로
-    # 블룸은 '짧게 눌렀다 떼면' 이름표가 뜬다 → 모두 짧게
-    tries = [("갓", x, y, TAP_MS), ("조금 아래", x, y + int(0.05 * w), TAP_MS),
-             ("밑동", x, y + int(0.09 * w), TAP_MS), ("갓(다른 방식)", x, y, 0)]
+    # 갓 맨 위는 인원 배지·진행 표시와 겹쳐 터치를 가로챌 수 있다 → 몸통(가운데) → 갓 → 밑동,
+    # 마지막은 2초 쉬고 손가락 내림/올림만 따로 보내는 방식. 블룸은 '짧게 눌렀다 떼면' 이름표가 뜬다
+    tries = [("몸통", x, y + int(0.04 * w), TAP_MS), ("갓", x, y, TAP_MS),
+             ("밑동", x, y + int(0.09 * w), TAP_MS), ("몸통(다른 방식)", x, y + int(0.04 * w), 0)]
+    small = lambda im: cv2.resize(im, (128, 256), interpolation=cv2.INTER_AREA).astype(np.int16)
+    base, frames, diffs = small(shot0), [], []
     for name, tx, ty, ms in tries:
         if ms:
             tap(tx, ty, ms)
@@ -498,15 +499,23 @@ def fetch_coords(x, y):
             label = find_label(img, x, y, shot0)
             if label:
                 break
+        frames.append(img)
+        diffs.append(float(np.abs(small(img) - base).mean()))  # 누른 뒤 화면이 얼마나 변했나 (0 = 그대로)
         if label:
             print(f"   이름표 뜸 (누른 자리: {name})")
             # 성공한 순간도 남겨 실패 사진과 비교할 수 있게 (왼쪽 누르기 전, 오른쪽 이름표 뜬 뒤)
             save_public("scout_label.jpg", np.hstack([annotate(shot0, [(name, 0, tx, ty)]), annotate(img, [("label", 0, *label)])]))
             break
     if not label:
-        marks = [(f"t{i + 1}", 0, tx, ty) for i, (_, tx, ty, _) in enumerate(tries[:3])]
-        save_public("scout_nolabel.jpg", np.hstack([annotate(shot0, marks), annotate(img, marks)]))
-        print("   이름표를 못 찾음 → 확인용 사진 (왼쪽 = 누르기 전, 오른쪽 = 누른 뒤, 빨간 원 = 누른 곳). 다음 바퀴에 다시 시도")
+        # 실패 기록: 누르기 전 + 누를 때마다의 화면을 나란히 (빨간 원 = 그때 누른 곳), 화면 변화량도 남김
+        panels = [annotate(shot0, [(f"t{i + 1}", 0, tx, ty) for i, (_, tx, ty, _) in enumerate(tries)])]
+        panels += [annotate(f, [(f"t{i + 1}", 0, tries[i][1], tries[i][2])]) for i, f in enumerate(frames[:3])]
+        strip = np.hstack([cv2.resize(p, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA) for p in panels])
+        save_public("scout_nolabel.jpg", strip)
+        changes = ", ".join(f"{t[0]} {d:.1f}" for t, d in zip(tries, diffs))
+        verdict = "거의 그대로 → 터치가 블룸에 안 들어감" if max(diffs) < 1.5 else "화면은 바뀜 → 다른 것이 눌렸거나 지도가 밀림"
+        print("   이름표를 못 찾음 → 확인용 사진 (왼쪽부터 누르기 전 · 1번 · 2번 · 3번 누른 뒤). 다음 바퀴에 다시 시도")
+        print(f"   진단: 누른 뒤 화면 변화 [{changes}] → {verdict}")
         print("   진단: " + touch_check())
         return None
     tap(*label)

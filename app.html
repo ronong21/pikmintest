@@ -263,7 +263,7 @@ function feedOf(log, want) {
     }
     if (l.includes("인원:")) { cand++; const p = l.match(/인원: (\S+)/)[1]; out.push(["", p === "읽기" ? "인원 수 읽기 실패 → 건너뜀" : `인원 ${p}명 확인`]); }
     else if (l.startsWith("발견!")) { found++; out.push(["good", "좌표 찾음! 알림 보냄 · " + l.replace("발견! ", "").split(" (")[0]]); }
-    else if (l.includes("이름표를 못 찾음") && ++miss) out.push(["warn", "버섯을 3번 눌러도 이름표가 안 떴어요 → 다음 바퀴에 다시 시도"]);
+    else if (l.includes("이름표를 못 찾음") && ++miss) out.push(["warn", "버섯을 여러 번 눌러도 이름표가 안 떴어요 → 다음 바퀴에 다시 시도"]);
     else if (l.includes("진단:")) out.push(["warn", l.trim()]);
     else if (l.includes("이름표 뜸")) out.push(["", l.trim()]);
     else if (l.includes("가운데로 옮겨서")) out.push(["", "화면 가장자리 버섯 → 가운데로 옮겨서 확인"]);
@@ -335,7 +335,7 @@ function render() {
         ${a.lat ? `<div class="row" style="margin-top:6px"><button data-copy="${esc(a.lat)},${esc(a.lng)}">복사</button>
         <button class="go" data-map="${esc(a.lat)},${esc(a.lng)}">지도</button></div>` : ""}</div></li>`).join("");
   }
-  const labels = {now: "지금 블룸 화면", label: "이름표 찾은 순간 (왼쪽 누르기 전 · 오른쪽 뜬 뒤)", nolabel: "이름표 못 찾은 순간 (왼쪽 누르기 전 · 오른쪽 누른 뒤)", stuck: "지도가 멈춘 순간"};
+  const labels = {now: "지금 블룸 화면", label: "이름표 찾은 순간 (왼쪽 누르기 전 · 오른쪽 뜬 뒤)", nolabel: "이름표 못 찾은 순간 (왼쪽부터 누르기 전 · 1번 · 2번 · 3번 누른 뒤)", stuck: "지도가 멈춘 순간"};
   const ph = Object.entries(st.photos);
   $("photos").innerHTML = ph.length ? ph.map(([k, t]) => `<a data-big="/photo/${k}?t=${t}">
       <img src="/photo/${k}?t=${t}" alt=""><div>${labels[k]}<br><span class="sub">${new Date(t * 1000).toLocaleString("ko-KR")}</span></div></a>`).join("")

@@ -19,7 +19,7 @@ VERSION = hashlib.md5(b"".join(open(os.path.join(ms.HERE, f), "rb").read()
 BUILD = open(os.path.join(ms.HERE, "version.txt"), encoding="utf-8").read().strip()     if os.path.exists(os.path.join(ms.HERE, "version.txt")) else ""  # 예: v58 · 2026-11-02 18:40
 state = {"proc": None, "target": None, "bg": True, "started": None, "user_stop": False, "shizuku": None,
          "opts": {}, "restarts": 0, "update": False}
-SETTINGS = {"max_people": (4, 0, 4), "cells": (40, 10, 120), "tap_ms": (100, 50, 1000), "max_minutes": (0, 0, 720), "vd_scale": (100, 50, 100), "zoom": (1, 0, 1), "audit": (1, 0, 1)}  # 이름: (기본, 최소, 최대)
+SETTINGS = {"max_people": (4, 0, 4), "cells": (40, 10, 120), "tap_ms": (100, 50, 1000), "max_minutes": (0, 0, 720), "vd_scale": (100, 50, 100), "zoom": (1, 0, 1), "audit": (1, 0, 1), "memory_hours": (2, 0, 24)}  # 이름: (기본, 최소, 최대)
 
 
 def watch_shizuku():
@@ -202,7 +202,7 @@ def reset_all():
     """처음부터 다시: 찾기 멈춤 → 찾은 내역·확인용 사진·기록 사진·검수 기록·진행 기록 모두 지움.
     (돌았던 곳 기록은 찾기 한 번 안에서만 쓰므로 다시 [찾기 시작]하면 처음 자리부터 새로 돈다)"""
     stop()
-    for p in [ms.FOUND, LOG] + [os.path.join(DL, f) for f in PHOTOS.values()]:
+    for p in [ms.FOUND, LOG, ms.MEMORY] + [os.path.join(DL, f) for f in PHOTOS.values()]:
         try:
             os.remove(p)
         except OSError:

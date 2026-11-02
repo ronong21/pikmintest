@@ -135,22 +135,64 @@ def sea_ratio(img):
     return float(((b > g + 15) & (b > r + 40)).mean())
 
 
-def explore(max_cells=None):
+def explore(max_cells=None, skip=None, flip=(1, 1, False)):
     """시작 칸(0,0)에서 가까운 칸부터 바깥쪽으로 훑는 순서를 낸다 (max_cells 없으면 끝없이).
     바다 칸 너머로는 넓히지 않고, 본 칸은 다시 안 본다. 같은 거리면 지금 칸에서 가까운 칸부터(이동 줄이기).
+    skip {칸: 바다였나}: 예전에 본 칸 → 건너뛰되 그 너머로는 넓힌다(바다였으면 안 넓힘).
+    flip: 같은 거리일 때 고르는 방향을 매번 바꾸는 값 (x부호, y부호, x·y 바꿈) → 시작할 때마다 다른 쪽부터.
     yield 한 칸에 대해 send(바다인지) 로 결과를 돌려받는다."""
-    seen, frontier, last = set(), {(0, 0)}, (0, 0)
-    while frontier and (max_cells is None or len(seen) < max_cells):
-        cell = min(frontier, key=lambda c: (abs(c[0]) + abs(c[1]), abs(c[0] - last[0]) + abs(c[1] - last[1]), c))
+    skip = skip or {}
+    sx, sy, swap = flip
+    order = lambda c: (c[1] * sy, c[0] * sx) if swap else (c[0] * sx, c[1] * sy)
+    seen, frontier, last, n_new = set(), {(0, 0)}, (0, 0), 0
+    while frontier and (max_cells is None or n_new < max_cells):
+        cell = min(frontier, key=lambda c: (abs(c[0]) + abs(c[1]), abs(c[0] - last[0]) + abs(c[1] - last[1]), order(c)))
         frontier.discard(cell)
         seen.add(cell)
-        last = cell
-        is_sea = yield cell
+        if cell in skip:  # 예전에 본 칸: 안 가고 너머만 넓힘
+            is_sea = skip[cell]
+        else:
+            last, n_new = cell, n_new + 1
+            is_sea = yield cell
         if not is_sea:
             for dx, dy in MOVES.values():
                 n = (cell[0] + dx, cell[1] + dy)
                 if n not in seen:
                     frontier.add(n)
+
+
+MEMORY = os.path.join(HERE, "visited.json")  # 본 곳 기억 (중지·꺼져도 남음)
+MEMORY_HOURS = 2  # 이 시간이 지난 칸은 다시 봄 (버섯이 새로 생길 수 있어서). --memory-hours
+
+
+def my_location():
+    """폰의 마지막 위치(위도, 경도). 블룸 GPS 등 가짜 위치도 여기 반영된다. 모르면 None."""
+    m = re.search(r"Location\[\w+ (-?\d+\.\d+),(-?\d+\.\d+)", adb("shell", "dumpsys location", check=False))
+    return (float(m.group(1)), float(m.group(2))) if m else None
+
+
+def load_memory(loc):
+    """같은 자리(약 100m 안)·같은 줌 설정에서 MEMORY_HOURS 안에 본 칸들 {칸: 바다였나}. 아니면 빈 기억."""
+    try:
+        mem = json.load(open(MEMORY, encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not loc or not mem.get("loc") or mem.get("zoom") != ZOOM_OUT:
+        return {}
+    if abs(mem["loc"][0] - loc[0]) > 0.001 or abs(mem["loc"][1] - loc[1]) > 0.0012:  # 약 100m
+        return {}
+    since = time.time() - MEMORY_HOURS * 3600
+    return {tuple(map(int, k.split(","))): v[1] for k, v in mem["cells"].items() if v[0] > since}
+
+
+def save_memory(loc, cells):
+    """본 칸 기록 {칸: (본 시각, 바다였나)}. 위치를 모르면 저장 안 함(다음에 엉뚱한 칸을 건너뛸 수 있어서)."""
+    if not loc:
+        return
+    tmp = MEMORY + ".tmp"
+    json.dump({"loc": loc, "zoom": ZOOM_OUT, "cells": {f"{c[0]},{c[1]}": v for c, v in cells.items()}},
+              open(tmp, "w", encoding="utf-8"))
+    os.replace(tmp, MEMORY)
 
 
 def travel(shape, src, dst):
@@ -788,8 +830,32 @@ def _scan(tpls, cells, want, rounds, max_people, once):
     audited = []  # 검수 사진을 찍은 버섯 위치 (같은 버섯을 또 누르지 않게)
     prev, still = None, 0  # 직전 화면, 연속으로 안 움직인 횟수
     pos, shape = (0, 0), screencap().shape
-    walk = explore()  # 한 번 만든 순서를 바퀴가 바뀌어도 이어 감 → 본 곳은 다시 안 보고 계속 바깥쪽으로
-    cell = next(walk)
+    if VD is None:  # 폰 화면 모드는 지도가 예전에 옮긴 자리에 남아 있을 수 있음 → '내 위치' 버튼으로 가운데 맞춤
+        img0 = screencap()
+        p = find_ui(img0, "locate", 0.75)
+        if p:
+            print("   지도를 내 위치로 되돌림")
+            tap(*p)
+            time.sleep(2)
+            zoom_out(img0.shape)
+    # 본 곳 기억: 같은 자리에서 다시 시작하면 MEMORY_HOURS 안에 본 칸은 건너뛰고 이어서 바깥쪽으로
+    loc = my_location()
+    prev_cells = load_memory(loc)
+    visited = {c: (time.time(), sea) for c, sea in prev_cells.items()}  # 이번에 저장할 기록 (예전 것 포함)
+    if prev_cells:
+        print(f"같은 자리에서 다시 시작: 최근 {MEMORY_HOURS}시간 안에 본 {len(prev_cells)}칸은 건너뛰고 이어서 봅니다")
+    elif loc:
+        print("새로 시작: 이 자리에서 처음부터 봅니다")
+    else:
+        print("내 위치를 몰라서 처음부터 봅니다 (본 곳 기억 안 씀)")
+    flip = (random.choice((1, -1)), random.choice((1, -1)), random.random() < 0.5)  # 처음 나가는 방향을 매번 랜덤
+    walk = explore(skip=prev_cells, flip=flip)  # 한 번 만든 순서를 바퀴가 바뀌어도 이어 감 → 본 곳은 다시 안 봄
+    try:
+        cell = next(walk)
+    except StopIteration:  # 주변을 다 봤으면(바다 등) 기억 없이 처음부터
+        prev_cells, visited = {}, {}
+        walk = explore(flip=flip)
+        cell = next(walk)
     for r in (itertools.count() if rounds == 0 else range(rounds)):
         i = 0
         while i < cells:
@@ -882,12 +948,16 @@ def _scan(tpls, cells, want, rounds, max_people, once):
                     if once:
                         return
                 break  # 화면이 바뀌었으니 다음 칸으로
+            visited[cell] = (time.time(), sea >= SEA_LIMIT)
+            if i % 3 == 0:
+                save_memory(loc, visited)
             try:
                 cell = walk.send(sea >= SEA_LIMIT)
             except StopIteration:  # 바다 등으로 더 갈 곳이 없음 → 처음 자리부터 다시
                 print("더 갈 새 지역이 없어서 처음 자리부터 다시 봅니다.")
-                walk = explore()
+                walk = explore(flip=flip)
                 cell = next(walk)
+        save_memory(loc, visited)
         print(f"이번 판 {i}칸 확인. 한 바퀴 다 봤어요 → 잠깐 쉬고 더 바깥쪽 새 지역을 봅니다 (본 곳은 다시 안 봄).")
         if rounds == 0 or r + 1 < rounds:
             for _ in range(random.randint(20, 40)):  # 새 버섯·인원 변화 대기
@@ -921,6 +991,9 @@ def selftest():
         pass
     assert len(order) == len(set(order)) == 30 and order[0] == (0, 0), order
     assert not any(c[0] < -1 for c in order), order  # 바다(서쪽 첫 칸) 너머로 안 감
+    w2 = explore(10, skip={c: False for c in order[:5]}, flip=(-1, 1, True))
+    again = [next(w2)] + [w2.send(False) for _ in range(9)]
+    assert not set(again) & set(order[:5]) and len(set(again)) == 10, again  # 본 칸 건너뜀
     assert {"ok", "compass", "toggle_normal", "toggle_wide"} <= set(UI), sorted(UI)  # 블룸 첫 화면 → 광역 지도
     # 좌표: 지도 앱 열기 전부터 있던 옛 주소는 빼고 새 주소만
     global adb
@@ -950,6 +1023,7 @@ if __name__ == "__main__":
     ap.add_argument("--max-people", type=int, default=4, help="인원 배지가 이 숫자 이하인 버섯만 (배지 없음 = 0명)")
     ap.add_argument("--max-minutes", type=int, default=0, help="이 시간(분)이 지나면 알아서 멈춤 (0 = 계속)")
     ap.add_argument("--vd-scale", type=float, default=1.0, help="백그라운드 가상 화면 크기 배율 (0.6~1, 낮을수록 발열 적음)")
+    ap.add_argument("--memory-hours", type=float, default=2, help="본 곳 기억 시간: 같은 자리에서 다시 시작하면 이 시간 안에 본 칸은 건너뜀")
     ap.add_argument("--audit", action="store_true", help="후보 검수: 조건에 안 맞는 후보도 사진+좌표 저장 (최대 30, 알림 없음)")
     ap.add_argument("--no-zoom", action="store_true", help="광역 지도 줌아웃 안 함")
     ap.add_argument("--tap-ms", type=int, default=TAP_MS, help="버섯 누르는 시간(ms). 이름표가 안 뜨면 늘려 본다")
@@ -961,6 +1035,7 @@ if __name__ == "__main__":
         VD_SCALE = min(1.0, max(0.5, a.vd_scale))
         ZOOM_OUT = not a.no_zoom
         AUDIT = a.audit
+        MEMORY_HOURS = a.memory_hours
         STOP_AT = time.time() + a.max_minutes * 60 if a.max_minutes else 0
         scan(a.cells, a.want, a.rounds, a.max_people, a.once, a.bg)
     elif a.mode == "vdtest":

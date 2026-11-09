@@ -202,6 +202,7 @@ input[type=text]{font:inherit;width:100%;padding:10px;border-radius:10px;border:
       <li>폰을 <b>재부팅</b>하면 Shizuku 를 다시 켜야 해요 (와이파이 연결 → Shizuku 앱 [시작]). 위 오른쪽 표시가 빨갛게 돼요.</li>
       <li><b>다른 앱을 쓰는 중</b>에 버섯 후보가 나오면, 버섯을 누르는 몇 초 동안만 블룸을 잠깐 앞으로 불러요(안 그러면 블룸이 터치를 무시함). 그동안 쓰던 앱의 키보드가 잠깐 닫힐 수 있고, 끝나면 쓰던 앱으로 돌려줘요.</li>
       <li><b>GPS 주말 모드</b>는 폰 위치를 다른 도시로 바꾸는 기능이에요(모의 위치). 블룸이 알아채면 위치가 안 잡히거나 계정 제재를 받을 수 있으니 본인 판단으로 쓰세요. 다른 위치 바꾸기 앱과 같이 켜지 마세요. [원래 위치로]나 [모두 끄기]를 누르면 진짜 위치로 돌아와요.</li>
+      <li><b>GPS 검수</b>: 위치를 옮길 때 다른 위치 바꾸기 앱이 켜져 있으면 끄고(서로 덮어써서), 폰 위치가 정말 바뀌었는지 확인해요. 찾은 버섯 좌표가 GPS 위치에서 30km 넘게 떨어져 있으면 블룸이 안 옮겨 간 것이라 블룸을 껐다 켜서 다시 맞춰요.</li>
       <li><b>블룸 소리 끄기</b>는 블룸 소리만 막아요. 음악·영상 등 다른 앱 소리는 그대로예요. 다시 누르면 켜져요.</li>
       <li>찾는 중에 홈 화면 [버섯찾기]를 다시 눌러도 찾기는 멈추지 않아요(앱 화면이 꺼져 있었으면 다시 켜면서 찾던 작업을 이어받아요).</li>
       <li>오래 돌릴 땐 <b>충전기</b>를 꽂아 두세요. 배터리 15% 이하(충전 안 함)면 알아서 멈춰요.</li>
@@ -292,6 +293,8 @@ function feedOf(log, want) {
     else if (l.includes("광역 지도로 다시 들어가 봅니다")) out.push(["warn", "지도가 안 움직여서 광역 지도로 다시 들어가 봄"]);
     else if (l.includes("검수 기록")) out.push(["", l.trim()]);
     else if (l.includes("GPS 주말 모드") || l.includes("이어받았어요") || l.includes("이슈 확인 →")) out.push(["", l.trim()]);
+    else if (l.includes("GPS 확인") || l.includes("GPS 검수")) out.push([/실패|안 옮겨|덮어써/.test(l) ? "warn" : "good", l.trim()]);
+    else if (l.includes("내 위치로 되돌림")) out.push(["", "지도를 내 위치(GPS)로 가운데 맞춤"]);
     else if (l.includes("광역 지도로 못 들어가서 블룸을")) out.push(["warn", "광역 지도로 못 들어가서 블룸을 껐다가 다시 띄움"]);
     else if (l.includes("포커스 줌")) out.push([l.includes("실패") ? "warn" : "", "다른 앱을 쓰는 중이라 버섯 누르는 동안만 블룸을 잠깐 앞으로 (끝나면 돌려줌)" + (l.includes("실패") ? " - " + l.split("실패: ")[1] : "")]);
     else if (l.includes("껐다가 다시 띄웁니다")) out.push(["warn", "지도가 계속 안 움직여서 블룸을 다시 띄움"]);
@@ -317,7 +320,7 @@ function render() {
   $("crashBar").hidden = !st.crashed;
   $("resumeBtn").hidden = st.running || !st.stalled;
   if (!st.running && st.stalled) $("stSub").textContent = "문제로 멈췄어요. 블룸에서 팝업 등을 해결한 뒤 [이슈 확인했어요]를 누르면 바로 이어서 찾아요";
-  $("gpsRow").hidden = !st.gps; $("gpsNow").textContent = st.gps ? `지금 위치: ${st.gps[0]} ${st.gps[1]}` : "";
+  $("gpsRow").hidden = !st.gps; $("gpsNow").textContent = st.gps ? `지금 위치: ${st.gps[0]} ${st.gps[1]}` + (st.gps_warn ? ` ⚠ ${st.gps_warn}` : "") : "";
   $("soundBtn").textContent = st.sound ? "블룸 소리 끄기 (다른 앱 소리는 그대로)" : "블룸 소리 켜기 (지금 꺼져 있음)";
   $("updBar").hidden = !st.update;
   $("shz").textContent = st.shizuku === false ? "Shizuku 꺼짐" : st.shizuku ? "Shizuku 연결됨" : "Shizuku 확인 중";

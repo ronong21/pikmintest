@@ -61,7 +61,9 @@ def all_targets():
 FOUND = os.path.join(HERE, "found.txt")
 AUDIT = False  # 후보 검수 모드 (--audit): 조건에 안 맞는 후보도 사진+좌표 저장 (알림 없음). 거대 버섯을 잘 거르는지 확인용
 AUDIT_MAX = 30
-AUDIT_DIR = os.path.join(HERE, "audit")  # 찾은 버섯 내역 (홈 화면 [버섯내역] 버튼으로 본다)
+AUDIT_DIR = os.path.join(HERE, "audit")
+GPS = None  # GPS 주말 모드 위치 (위도, 경도). 찾은 버섯 좌표로 블룸 지도가 정말 거기 있는지 검사한다
+GPS_FAR_KM = 30  # 찾은 좌표가 GPS 위치에서 이보다 멀면 블룸이 그 자리로 안 옮겨 간 것  # 찾은 버섯 내역 (홈 화면 [버섯내역] 버튼으로 본다)
 
 
 def _cmd(*args):
@@ -698,6 +700,43 @@ def gps_clear():
     adb("shell", "; ".join(f"cmd location providers remove-test-provider {p}" for p in GPS_PROVIDERS), check=False)
 
 
+def gps_phone():
+    """폰 GPS 가 지금 알려 주는 위치 (gps 제공자). 모르면 None."""
+    m = re.search(r"Location\[gps (-?\d+\.\d+),(-?\d+\.\d+)", adb("shell", "dumpsys location", check=False))
+    return (float(m.group(1)), float(m.group(2))) if m else None
+
+
+def km(a, b):
+    """두 (위도, 경도) 사이 거리(km, 대략)."""
+    import math
+    la1, lo1, la2, lo2 = (math.radians(float(v)) for v in (*a, *b))
+    return 6371 * math.hypot(la2 - la1, (lo2 - lo1) * math.cos((la1 + la2) / 2))
+
+
+def mock_apps():
+    """셸 말고 '모의 위치'가 허용된 앱들 (다른 위치 바꾸기 앱). 이 앱들이 위치를 계속 덮어쓰면 블룸이 우리 위치로 안 옮겨 간다."""
+    out = adb("shell", "appops query-op android:mock_location allow", check=False)
+    return [p for p in re.findall(r"^\s*([\w.]+)\s*$", out, re.M) if p != "com.android.shell" and "." in p]
+
+
+def gps_take_over(lat, lng):
+    """다른 위치 앱을 끄고 우리 위치를 넣은 뒤, 폰 GPS 가 정말 그 자리인지 확인. 진행 기록에 남길 문장들을 돌려준다."""
+    msgs = []
+    others = mock_apps()
+    if others:
+        adb("shell", "; ".join(f"am force-stop {p}" for p in others), check=False)
+        msgs.append(f"GPS 확인: 다른 위치 앱({', '.join(others)})이 위치를 덮어써서 껐어요. GPS 주말 모드 중에는 그 앱을 켜지 마세요")
+    for _ in range(3):
+        gps_set(lat, lng)
+        time.sleep(3)
+        now = gps_phone()
+        if now and km(now, (lat, lng)) < 1:
+            msgs.append(f"GPS 확인: 폰 위치가 {lat},{lng} 로 바뀐 것 확인")
+            return msgs
+    msgs.append(f"GPS 확인 실패: 폰 위치가 {now[0]:.4f},{now[1]:.4f} 에 남아 있어요" if now else "GPS 확인 실패: 폰 위치를 못 읽음")
+    return msgs
+
+
 def bloom_sound(on):
     """블룸 소리만 켜고 끄기 (다른 앱 음악·영상 소리는 그대로). 셸의 앱 권한(PLAY_AUDIO)으로 블룸 소리를 막는다."""
     adb("shell", f"appops set {PIKMIN_PKG} PLAY_AUDIO {'allow' if on else 'ignore'}", check=False)
@@ -953,7 +992,8 @@ def _scan(tpls, cells, want, rounds, max_people, once):
     audited = []  # 검수 사진을 찍은 버섯 위치 (같은 버섯을 또 누르지 않게)
     prev, still = None, 0  # 직전 화면, 연속으로 안 움직인 횟수
     pos, shape = (0, 0), screencap().shape
-    if VD is None:  # 폰 화면 모드는 지도가 예전에 옮긴 자리에 남아 있을 수 있음 → '내 위치' 버튼으로 가운데 맞춤
+    # 폰 화면 모드는 지도가 예전에 옮긴 자리에 남아 있을 수 있고, GPS 주말 모드는 막 옮긴 위치로 → '내 위치' 버튼으로 가운데 맞춤
+    if VD is None or GPS:
         img0 = screencap()
         p = find_ui(img0, "locate", 0.75)
         if p:
@@ -972,6 +1012,7 @@ def _scan(tpls, cells, want, rounds, max_people, once):
     else:
         print("내 위치를 몰라서 처음부터 봅니다 (본 곳 기억 안 씀)")
     flip = (random.choice((1, -1)), random.choice((1, -1)), random.random() < 0.5)  # 처음 나가는 방향을 매번 랜덤
+    relocate, fixes = False, 0  # GPS 검수: 블룸 지도가 GPS 위치에 없으면 다시 띄움
     walk = explore(skip=prev_cells, flip=flip)  # 한 번 만든 순서를 바퀴가 바뀌어도 이어 감 → 본 곳은 다시 안 봄
     try:
         cell = next(walk)
@@ -1070,6 +1111,10 @@ def _scan(tpls, cells, want, rounds, max_people, once):
                     time.sleep(1)
                 if people is not None and people > max_people:
                     continue
+                if coords and GPS and km(coords, GPS) > GPS_FAR_KM:
+                    far = km(coords, GPS)
+                    print(f"   GPS 검수: 찾은 버섯이 GPS 위치에서 {far:.0f}km 떨어져 있어요 → 블룸 지도가 GPS 위치로 안 옮겨 감")
+                    relocate = True
                 if coords:
                     reported.append((gx, gy))
                     if already_found(*coords):
@@ -1080,6 +1125,30 @@ def _scan(tpls, cells, want, rounds, max_people, once):
                     if once:
                         return
                 break  # 화면이 바뀌었으니 다음 칸으로
+            if relocate:  # 블룸을 GPS 위치에서 다시 띄우고 그 자리부터 다시 훑는다 (최대 2번, 그다음은 알림만)
+                relocate = False
+                fixes += 1
+                if fixes > 2:
+                    if fixes == 3:
+                        notify("버섯 탐지기: 블룸이 GPS 위치로 안 옮겨 가요", "다른 위치 바꾸기 앱이 켜져 있는지 확인해 주세요")
+                        print("   GPS 검수: 2번 다시 띄워도 블룸이 GPS 위치로 안 옮겨 가요 (다른 위치 앱 확인). 지금 자리에서 계속 찾아요")
+                else:
+                    print("   GPS 검수: 블룸을 껐다 켜서 GPS 위치로 다시 맞춥니다")
+                    for m in gps_take_over(*GPS):
+                        print("   " + m)
+                    adb("shell", f"am force-stop {PIKMIN_PKG}", check=False)
+                    launch_pikmin()
+                    time.sleep(10)
+                    with bloom_focus():
+                        goto_wide_map()
+                        p = find_ui(screencap(), "locate", 0.75)
+                        if p:
+                            tap(*p)
+                            time.sleep(2)
+                            zoom_out(shape)
+                    pos, walk, prev, still = (0, 0), explore(flip=flip), None, 0
+                    cell, reported, audited, visited = next(walk), [], [], {}
+                    continue
             visited[cell] = (time.time(), sea >= SEA_LIMIT)
             if i % 3 == 0:
                 save_memory(loc, visited)
@@ -1140,6 +1209,7 @@ def selftest():
     assert gps_pick(utc(2026, 11, 16, 9))[0] == "호놀룰루"  # 월 18시 KST: LA 는 월요일 01시
     assert gps_weekend("캘리포니아", utc(2026, 11, 15, 23)) and not gps_weekend("캘리포니아", utc(2026, 11, 16, 9))
     assert gps_pick(utc(2026, 11, 11, 3)) is None  # 수 12시 KST
+    assert 38.5 < km((34.0522, -118.2437), (34.4, -118.2437)) < 38.9 and km((37.4852, -122.2364), (37.4852, -122.2364)) == 0
     # 좌표: 지도 앱 열기 전부터 있던 옛 주소는 빼고 새 주소만
     global adb
     real_adb, dumps = adb, iter(["query=37.111111,-122.111111", "query=37.111111,-122.111111 query=37.222222,-122.222222"])
@@ -1171,6 +1241,7 @@ if __name__ == "__main__":
     ap.add_argument("--memory-hours", type=float, default=2, help="본 곳 기억 시간: 같은 자리에서 다시 시작하면 이 시간 안에 본 칸은 건너뜀")
     ap.add_argument("--audit", action="store_true", help="후보 검수: 조건에 안 맞는 후보도 사진+좌표 저장 (최대 30, 알림 없음)")
     ap.add_argument("--no-zoom", action="store_true", help="광역 지도 줌아웃 안 함")
+    ap.add_argument("--gps", help="GPS 주말 모드 위치 '위도,경도' - 찾은 좌표가 여기서 멀면 블룸이 안 옮겨 간 것 → 블룸을 다시 띄움")
     ap.add_argument("--tap-ms", type=int, default=TAP_MS, help="버섯 누르는 시간(ms). 이름표가 안 뜨면 늘려 본다")
     a = ap.parse_args()
     if a.mode == "grab":
@@ -1181,6 +1252,7 @@ if __name__ == "__main__":
         ZOOM_OUT = not a.no_zoom
         AUDIT = a.audit
         MEMORY_HOURS = a.memory_hours
+        GPS = tuple(float(v) for v in a.gps.split(",")) if a.gps else None
         STOP_AT = time.time() + a.max_minutes * 60 if a.max_minutes else 0
         scan(a.cells, a.want, a.rounds, a.max_people, a.once, a.bg)
     elif a.mode == "vdtest":

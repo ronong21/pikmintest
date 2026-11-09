@@ -152,8 +152,7 @@ def watch_gps():
                 if was:
                     stop()
                 state["gps"] = nxt
-                ms.gps_set(*nxt[2:])
-                time.sleep(3)
+                msg += "".join(m + "\n" for m in ms.gps_take_over(*nxt[2:]))
             open(LOG, "a", encoding="utf-8").write(msg)
             if nxt and was:  # 블룸을 새 위치에서 다시 띄우고 본 곳 기억도 새로 (기록은 이어서)
                 start(state["target"], state["bg"], state["opts"], keep_log=True)
@@ -177,9 +176,9 @@ def gps_apply(on):
             state["gps"] = None
         return "GPS 주말 모드: 지금 주말인 도시가 없어서(한국 화~목) 위치를 옮기지 않고 내 자리에서 찾아요\n"
     state["gps"] = spot
-    ms.gps_set(*spot[2:])
-    time.sleep(3)  # 블룸이 새 위치를 받을 시간
-    return f"GPS 주말 모드: 지금 주말인 {spot[0]}의 '{spot[1]}'({spot[2]},{spot[3]})로 위치를 옮겼어요\n"
+    checks = ms.gps_take_over(*spot[2:])  # 다른 위치 앱 끄기 + 폰 위치가 정말 바뀌었는지 확인
+    state["gps_warn"] = next((m for m in checks if "실패" in m), "")
+    return f"GPS 주말 모드: 지금 주말인 {spot[0]}의 '{spot[1]}'({spot[2]},{spot[3]})로 위치를 옮겼어요\n" + "".join(m + "\n" for m in checks)
 
 
 def watch_crash():
@@ -215,7 +214,8 @@ def start(target, bg, opts, keep_log=False):
         if k == "zoom":
             cmd += [] if v else ["--no-zoom"]
             continue
-        if k == "gps":  # 위치 옮기기는 앱 서버가 함 (찾기를 멈춰도 그 자리에 남아 있게)
+        if k == "gps":  # 위치 옮기기는 앱 서버가 함 (찾기를 멈춰도 그 자리에 남아 있게). 찾기는 검수용으로 위치만 받음
+            cmd += ["--gps", f"{state['gps'][2]},{state['gps'][3]}"] if state["gps"] else []
             continue
         if k == "audit":  # 거대 버섯을 찾을 때만 (잘 거르는지 확인용)
             name = ms.all_targets().get(target, "")
@@ -499,7 +499,7 @@ class H(BaseHTTPRequestHandler):
             # 사용자가 [중지]를 안 눌렀는데 멈춤(광역 지도 못 들어감·지도 멈춤 등) → [이슈 확인했어요] 버튼
             stalled = p is not None and p.poll() is not None and not state["user_stop"]
             return self.send({"version": VERSION, "build": BUILD, "running": running(), "target": state["target"], "bg": state["bg"],
-                              "started": state["started"], "log": tail(400), "gps": state["gps"], "stalled": stalled,
+                              "started": state["started"], "log": tail(400), "gps": state["gps"], "gps_warn": state.get("gps_warn", ""), "stalled": stalled,
                               "sound": not os.path.exists(SOUND_OFF), "crashed": crashed, "update": state["update"],
                               "audit": audit_rows(),
                               "shizuku": state["shizuku"], "settings": {k: v[0] for k, v in SETTINGS.items()},

@@ -145,7 +145,7 @@ public final class ScoutDisplay {
             return;
         }
         if (a[0].equals("focus")) {  // focus <화면번호>: 그 화면 맨 위 작업(블룸)에 포커스. 원래 포커스였던 작업 번호를 prev 로 출력
-            focus(Integer.parseInt(a[1]));
+            focus(Integer.parseInt(a[1]), a.length > 2 ? a[2] : null);
             return;
         }
         if (a[0].equals("focus-task")) {  // focus-task <작업번호>: 그 작업(원래 쓰던 앱)으로 포커스를 돌려줌
@@ -292,7 +292,8 @@ public final class ScoutDisplay {
 
     // 다른 앱이 앞에 있으면 가상 화면의 블룸(유니티)은 포커스가 없어 지도 위 버섯 터치를 무시한다
     // → 버섯을 누르는 동안만 블룸 작업에 포커스를 준다 (STEAL_TOP_FOCUS_DISABLED 는 '터치로' 뺏는 것만 막는다)
-    static void focus(int display) throws Exception {
+    // pkg 를 주면 그 앱(블룸)의 작업을 고른다 (지도 앱 등 다른 작업이 같은 화면에 남아 있어도 블룸에 포커스)
+    static void focus(int display, String pkg) throws Exception {
         Object atm = atm();
         Object cur = method(atm, "getFocusedRootTaskInfo", 0).invoke(atm);
         System.out.println("prev " + (cur == null ? -1 : cur.getClass().getField("taskId").getInt(cur)));
@@ -301,7 +302,15 @@ public final class ScoutDisplay {
             System.out.println("no task on display " + display);
             return;
         }
-        int id = tasks.get(0).getClass().getField("taskId").getInt(tasks.get(0));
+        Object pick = tasks.get(0);
+        for (Object t : tasks) {
+            for (String f : new String[]{"topActivity", "baseActivity"}) {
+                Object c = t.getClass().getField(f).get(t);
+                if (pkg != null && c != null && pkg.equals(((android.content.ComponentName) c).getPackageName())) pick = t;
+            }
+            System.out.println("task " + t.getClass().getField("taskId").getInt(t) + " " + t.getClass().getField("topActivity").get(t));
+        }
+        int id = pick.getClass().getField("taskId").getInt(pick);
         method(atm, "setFocusedTask", 1).invoke(atm, id);
         System.out.println("focused " + id);
     }

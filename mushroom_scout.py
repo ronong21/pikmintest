@@ -256,7 +256,13 @@ def detect(img, tpls, threshold=THRESHOLD):
 
 
 def _digit_vec(g):
-    v = cv2.resize((g > 0).astype(np.float32), (12, 18), interpolation=cv2.INTER_AREA).ravel()
+    # 가로를 세로의 0.7 이상으로 여백을 붙인 뒤 줄인다: 막대 하나뿐인 '1'을 그냥 줄이면 꽉 찬 네모가 되어 점수가 0이 됨
+    g = (g > 0).astype(np.float32)
+    h, w = g.shape
+    pad = np.zeros((h, max(w, int(h * 0.7))), np.float32)
+    x0 = (pad.shape[1] - w) // 2
+    pad[:, x0:x0 + w] = g
+    v = cv2.resize(pad, (12, 18), interpolation=cv2.INTER_AREA).ravel()
     return v - v.mean()
 
 
@@ -281,6 +287,9 @@ def read_people(img, x, y):
         return None
     s = ""
     for _, g in glyphs:
+        if g.shape[1] <= 0.4 * g.shape[0]:  # 가늘고 긴 막대 = 1 (블룸 글꼴의 1은 꼬리 없는 막대라 모양 비교로는 점수가 낮음)
+            s += "1"
+            continue
         v = _digit_vec(g)
         scores = {d: float(v @ _digit_vec(t) / (np.linalg.norm(v) * np.linalg.norm(_digit_vec(t)) + 1e-6))
                   for d, t in DIGITS.items()}
@@ -457,7 +466,9 @@ def bloom_focus():
     prev = None
     front = front_app() if VD is not None else PIKMIN_PKG
     if PIKMIN_PKG not in front:
-        out = helper(f"focus {VD}")
+        # 지난번에 연 지도 앱이 가상 화면에 남아 있으면 포커스가 그쪽으로 갈 수 있다 → 먼저 끄고, 블룸 작업을 골라 포커스
+        adb("shell", f"am force-stop {MAPS_PKG}", check=False)
+        out = helper(f"focus {VD} {PIKMIN_PKG}")
         m = re.search(r"prev (-?\d+)", out)
         prev = int(m.group(1)) if m else None
         print(f"   블룸에 잠깐 포커스 줌 (앞에 있던 앱: {front or '알 수 없음'})"
@@ -581,7 +592,7 @@ def report(lat, lng, people=0):
     with open(FOUND, "a", encoding="utf-8") as f:
         f.write(time.strftime("%Y-%m-%d %H:%M ") + f"{txt} 인원 {people} {WANT_NAME}\n")
     termux_api("termux-clipboard-set", txt)
-    alert(f"인원 {people}명 · {txt} (버섯찾기 메뉴 4번에서 지도로 열기)")
+    alert(f"{'인원 확인 필요' if people is None else f'인원 {people}명'} · {txt} (버섯찾기 메뉴 4번에서 지도로 열기)")
 
 
 def audit_add(img, name, x, y, people, coords, status):
@@ -638,11 +649,11 @@ def notify(title, text):
 
 # GPS 주말 모드: 거대 버섯은 '그 나라 시간' 주말에 나온다 → 지금 주말인 도시로 위치를 옮겨 찾는다.
 # (지역, 시간대, 시간대 못 읽을 때의 UTC 시차, 사람 많은 순위(클수록 많음), [(이름, 위도, 경도)] = 붐비는 곳 · 적당히 붐비는 곳)
-# 금요일 저녁(한국)엔 오클랜드·시드니가 먼저 토요일, 월요일(한국)엔 LA·호놀룰루가 아직 일요일
+# 금요일 저녁(한국)엔 오클랜드·시드니가 먼저 토요일, 월요일(한국)엔 캘리포니아(LA·레드우드시티 같은 시간대)·호놀룰루가 아직 일요일
 GPS_SPOTS = [
     ("서울", "Asia/Seoul", 9, 3, [("강남역", 37.4979, 127.0276), ("분당 서현역", 37.3850, 127.1230)]),
     ("도쿄", "Asia/Tokyo", 9, 3, [("시부야", 35.6595, 139.7005), ("기치조지", 35.7031, 139.5798)]),
-    ("LA", "America/Los_Angeles", -8, 3, [("LA 다운타운", 34.0522, -118.2437), ("어바인 스펙트럼", 33.6506, -117.7437)]),
+    ("캘리포니아", "America/Los_Angeles", -8, 3, [("LA 다운타운", 34.0522, -118.2437), ("레드우드시티", 37.4852, -122.2364)]),
     ("시드니", "Australia/Sydney", 11, 2, [("시드니 타운홀", -33.8731, 151.2065), ("파라마타", -33.8170, 151.0034)]),
     ("오클랜드", "Pacific/Auckland", 13, 1, [("오클랜드 퀸 스트리트", -36.8485, 174.7633), ("뉴마켓", -36.8696, 174.7781)]),
     ("호놀룰루", "Pacific/Honolulu", -10, 1, [("와이키키", 21.2767, -157.8270), ("카일루아", 21.3972, -157.7394)]),
@@ -650,19 +661,22 @@ GPS_SPOTS = [
 GPS_PROVIDERS = ("gps", "network", "fused")
 
 
+def gps_weekend(region, now=None):
+    """그 지역 현지 시각이 지금 토·일요일인가."""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    _, tz, off, _, _ = next(s for s in GPS_SPOTS if s[0] == region)
+    try:
+        from zoneinfo import ZoneInfo
+        local = now.astimezone(ZoneInfo(tz))
+    except Exception:  # ponytail: 시간대 자료가 없는 폰이면 고정 시차(서머타임 1시간 오차), tzdata 설치로 해결
+        local = now.astimezone(datetime.timezone(datetime.timedelta(hours=off)))
+    return local.weekday() >= 5
+
+
 def gps_pick(now=None):
     """지금 현지 시각이 주말(토·일)인 지역 중 사람 많은 지역 → 그 안의 두 곳 중 랜덤. 주말인 곳이 없으면 None.
     돌려주는 값: (지역, 장소 이름, 위도, 경도)"""
-    now = now or datetime.datetime.now(datetime.timezone.utc)
-    ok = []
-    for region, tz, off, rank, places in GPS_SPOTS:
-        try:
-            from zoneinfo import ZoneInfo
-            local = now.astimezone(ZoneInfo(tz))
-        except Exception:  # ponytail: 시간대 자료가 없는 폰이면 고정 시차(서머타임 1시간 오차), tzdata 설치로 해결
-            local = now.astimezone(datetime.timezone(datetime.timedelta(hours=off)))
-        if local.weekday() >= 5:
-            ok.append((rank, region, places))
+    ok = [(rank, region, places) for region, _, _, rank, places in GPS_SPOTS if gps_weekend(region, now)]
     if not ok:
         return None
     top = max(r for r, _, _ in ok)
@@ -923,7 +937,16 @@ def scan(cells, want, rounds, max_people, once, bg=False):
 def _scan(tpls, cells, want, rounds, max_people, once):
     launch_pikmin()
     time.sleep(3)  # 피크민 블룸을 앞으로 띄우고 지도가 그려질 때까지
-    if not goto_wide_map():
+    with bloom_focus():
+        ok = goto_wide_map()
+    if not ok:  # 팝업 등으로 못 들어감 → 블룸을 껐다 켜서 한 번 더
+        print("   광역 지도로 못 들어가서 블룸을 껐다가 다시 띄웁니다")
+        adb("shell", f"am force-stop {PIKMIN_PKG}", check=False)
+        launch_pikmin()
+        time.sleep(10)
+        with bloom_focus():
+            ok = goto_wide_map()
+    if not ok:
         notify("버섯 탐지기: 광역 지도로 못 들어감", "메뉴 5번 사진으로 블룸 화면을 확인해 주세요")
         return
     reported = []  # 이미 처리한 버섯의 지도상 위치(시작점 기준 픽셀) - 같은 버섯을 또 누르지 않게
@@ -1030,7 +1053,7 @@ def _scan(tpls, cells, want, rounds, max_people, once):
                 people = read_people(cur, x, y)
                 print(f"   {n} ({x},{y}) 인원: {'읽기 실패' if people is None else people}")
                 coords = None
-                ok = people is not None and people <= max_people
+                ok = people is None or people <= max_people  # 못 읽으면 놓치지 않게 좌표까지 얻고 '인원 확인 필요'로 알림
                 # 검수 모드: 조건에 안 맞는 후보도 사진+좌표를 남긴다 (알림·카운트 없음, 최대 AUDIT_MAX 장)
                 check = AUDIT and len(audited) < AUDIT_MAX and not any(
                     (gx - a) ** 2 + (gy - b) ** 2 < (0.25 * w) ** 2 for a, b in audited)
@@ -1045,7 +1068,7 @@ def _scan(tpls, cells, want, rounds, max_people, once):
                 if shift:  # 지도를 원래 칸 위치로 되돌림 (격자 탐색 위치가 어긋나지 않게)
                     drag(w, h, -shift[0], -shift[1])
                     time.sleep(1)
-                if people is None or people > max_people:
+                if people is not None and people > max_people:
                     continue
                 if coords:
                     reported.append((gx, gy))
@@ -1104,11 +1127,18 @@ def selftest():
     again = [next(w2)] + [w2.send(False) for _ in range(9)]
     assert not set(again) & set(order[:5]) and len(set(again)) == 10, again  # 본 칸 건너뜀
     assert {"ok", "compass", "toggle_normal", "toggle_wide"} <= set(UI), sorted(UI)  # 블룸 첫 화면 → 광역 지도
+    # 인원 배지: 꼬리 없는 막대 '1'도 1로 읽는다 (예전엔 '읽기 실패'로 귀한 1명 버섯을 놓침)
+    badge = np.full((800, REF_W, 3), (60, 140, 50), np.uint8)
+    ic = UI["badge_icon"]
+    badge[400:400 + ic.shape[0], 480:480 + ic.shape[1]] = ic
+    badge[402:424, 480 + 34:480 + 38] = 255
+    assert read_people(badge, 500, 500) == 1, read_people(badge, 500, 500)
     # GPS 주말 모드: 한국 금요일 밤 → 오세아니아, 한국 월요일 아침 → 미국(아직 일요일), 한국 수요일 낮 → 없음
     utc = lambda *a: datetime.datetime(*a, tzinfo=datetime.timezone.utc)
     assert gps_pick(utc(2026, 11, 13, 14))[0] in ("시드니", "오클랜드"), gps_pick(utc(2026, 11, 13, 14))  # 금 23시 KST
-    assert gps_pick(utc(2026, 11, 15, 23))[0] == "LA", gps_pick(utc(2026, 11, 15, 23))  # 월 08시 KST
+    assert gps_pick(utc(2026, 11, 15, 23))[0] == "캘리포니아", gps_pick(utc(2026, 11, 15, 23))  # 월 08시 KST
     assert gps_pick(utc(2026, 11, 16, 9))[0] == "호놀룰루"  # 월 18시 KST: LA 는 월요일 01시
+    assert gps_weekend("캘리포니아", utc(2026, 11, 15, 23)) and not gps_weekend("캘리포니아", utc(2026, 11, 16, 9))
     assert gps_pick(utc(2026, 11, 11, 3)) is None  # 수 12시 KST
     # 좌표: 지도 앱 열기 전부터 있던 옛 주소는 빼고 새 주소만
     global adb

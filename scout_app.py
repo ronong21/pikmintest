@@ -134,11 +134,32 @@ def do_update():
 
 
 def watch_gps():
-    """GPS 주말 모드 중엔 30초마다 같은 위치를 다시 넣어 준다 (안 넣으면 블룸이 위치 신호를 잃음)."""
+    """GPS 주말 모드 중엔 30초마다 같은 위치를 다시 넣어 준다 (안 넣으면 블룸이 위치 신호를 잃음).
+    10분마다: 지금 도시의 주말이 끝났으면 다음으로 주말인 도시로 옮기고, 찾는 중이면 그 자리에서 다시 찾는다."""
+    n = 0
     while True:
         time.sleep(30)
-        if state["gps"]:
-            ms.gps_set(*state["gps"][2:])
+        n += 1
+        spot = state["gps"]
+        if not spot:
+            continue
+        if n % 20 == 0 and not ms.gps_weekend(spot[0]):
+            nxt = ms.gps_pick()
+            msg = (f"\nGPS 주말 모드: {spot[0]}의 주말이 끝나서 " + (f"지금 주말인 {nxt[0]}의 '{nxt[1]}'({nxt[2]},{nxt[3]})로 옮겨요\n" if nxt
+                   else "옮길 곳이 없어요(주말인 도시 없음). 지금 자리에 그대로 있어요\n"))
+            if nxt:
+                was = running()
+                if was:
+                    stop()
+                state["gps"] = nxt
+                ms.gps_set(*nxt[2:])
+                time.sleep(3)
+            open(LOG, "a", encoding="utf-8").write(msg)
+            if nxt and was:  # 블룸을 새 위치에서 다시 띄우고 본 곳 기억도 새로 (기록은 이어서)
+                start(state["target"], state["bg"], state["opts"], keep_log=True)
+                state["restarts"] = 0
+            continue
+        ms.gps_set(*state["gps"][2:])
 
 
 def gps_apply(on):
@@ -475,8 +496,10 @@ class H(BaseHTTPRequestHandler):
         if path == "/api/status":
             p = state["proc"]
             crashed = p is not None and p.poll() not in (None, 0) and not state["user_stop"]
+            # 사용자가 [중지]를 안 눌렀는데 멈춤(광역 지도 못 들어감·지도 멈춤 등) → [이슈 확인했어요] 버튼
+            stalled = p is not None and p.poll() is not None and not state["user_stop"]
             return self.send({"version": VERSION, "build": BUILD, "running": running(), "target": state["target"], "bg": state["bg"],
-                              "started": state["started"], "log": tail(400), "gps": state["gps"],
+                              "started": state["started"], "log": tail(400), "gps": state["gps"], "stalled": stalled,
                               "sound": not os.path.exists(SOUND_OFF), "crashed": crashed, "update": state["update"],
                               "audit": audit_rows(),
                               "shizuku": state["shizuku"], "settings": {k: v[0] for k, v in SETTINGS.items()},
@@ -503,6 +526,13 @@ class H(BaseHTTPRequestHandler):
         path = self.path
         if path == "/api/start":
             return self.send({"ok": start(data.get("target"), bool(data.get("bg", True)), data.get("opts", {}))})
+        if path == "/api/resume":  # 이슈 확인했어요: 블룸 팝업 등을 직접 해결한 뒤 같은 설정으로 바로 이어서
+            if running() or not state["target"]:
+                return self.send({"error": "이어서 할 찾기가 없어요"})
+            open(LOG, "a", encoding="utf-8").write("\n이슈 확인 → 같은 설정으로 이어서 찾습니다\n")
+            state["restarts"] = 0
+            start(state["target"], state["bg"], state["opts"], keep_log=True)
+            return self.send({"ok": "이어서 찾아요"})
         if path == "/api/stop":
             return self.send({"ok": stop()})
         if path == "/api/register_point":

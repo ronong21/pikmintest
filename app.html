@@ -76,7 +76,8 @@ input[type=text]{font:inherit;width:100%;padding:10px;border-radius:10px;border:
 <header><h1>버섯 탐지기 <small id="ver"></small></h1><span class="chip" id="shz">Shizuku 확인 중</span></header>
 
 <div class="card">
-  <div class="status"><div class="dot" id="dot"></div><div><b id="stTitle">대기 중</b><div class="sub" id="stSub">찾을 버섯을 고르고 [찾기 시작]</div></div></div>
+  <div class="status"><div class="dot" id="dot"></div><div style="flex:1"><b id="stTitle">대기 중</b><div class="sub" id="stSub">찾을 버섯을 고르고 [찾기 시작]</div></div>
+    <button class="go" id="resumeBtn" hidden title="블룸 팝업 등을 직접 해결했으면 눌러서 같은 설정으로 바로 이어서">이슈 확인했어요 → 이어서</button></div>
   <div class="stats" id="stats" hidden>
     <div class="stat"><b id="sCells">0</b><span class="sub">확인한 칸</span></div>
     <div class="stat"><b id="sCand">0</b><span class="sub">버섯 후보</span></div>
@@ -270,7 +271,7 @@ function feedOf(log, want) {
       if (want && m[6].includes(want)) out.push(["", `${m[1]}바퀴 ${m[2]}번째 칸에서 버섯 후보 발견`]);
       continue;
     }
-    if (l.includes("인원:")) { cand++; const p = l.match(/인원: (\S+)/)[1]; out.push(["", p === "읽기" ? "인원 수 읽기 실패 → 건너뜀" : `인원 ${p}명 확인`]); }
+    if (l.includes("인원:")) { cand++; const p = l.match(/인원: (\S+)/)[1]; out.push(["", p === "읽기" ? "인원 수 읽기 실패 → 놓치지 않게 좌표까지 확인" : `인원 ${p}명 확인`]); }
     else if (l.startsWith("발견!")) { found++; out.push(["good", "좌표 찾음! 알림 보냄 · " + l.replace("발견! ", "").split(" (")[0]]); }
     else if (l.includes("이름표를 못 찾음") && ++miss) out.push(["warn", "버섯을 여러 번 눌러도 이름표가 안 떴어요 → 다음 바퀴에 다시 시도"]);
     else if (l.includes("진단:")) out.push(["warn", l.trim()]);
@@ -290,7 +291,8 @@ function feedOf(log, want) {
     else if (l.includes("까맣게")) out.push(["warn", "블룸 화면이 까맣게 나와서 블룸을 다시 띄움"]);
     else if (l.includes("광역 지도로 다시 들어가 봅니다")) out.push(["warn", "지도가 안 움직여서 광역 지도로 다시 들어가 봄"]);
     else if (l.includes("검수 기록")) out.push(["", l.trim()]);
-    else if (l.includes("GPS 주말 모드") || l.includes("이어받았어요")) out.push(["", l.trim()]);
+    else if (l.includes("GPS 주말 모드") || l.includes("이어받았어요") || l.includes("이슈 확인 →")) out.push(["", l.trim()]);
+    else if (l.includes("광역 지도로 못 들어가서 블룸을")) out.push(["warn", "광역 지도로 못 들어가서 블룸을 껐다가 다시 띄움"]);
     else if (l.includes("포커스 줌")) out.push([l.includes("실패") ? "warn" : "", "다른 앱을 쓰는 중이라 버섯 누르는 동안만 블룸을 잠깐 앞으로 (끝나면 돌려줌)" + (l.includes("실패") ? " - " + l.split("실패: ")[1] : "")]);
     else if (l.includes("껐다가 다시 띄웁니다")) out.push(["warn", "지도가 계속 안 움직여서 블룸을 다시 띄움"]);
     else if (l.includes("배터리") || l.includes("6번") || l.includes("멈춥니다")) out.push(["bad", l.trim()]);
@@ -313,6 +315,8 @@ function render() {
   $("stats").hidden = !st.started;
   $("sCells").textContent = f.cells; $("sCand").textContent = f.cand; $("sFound").textContent = f.found; $("sMiss").textContent = f.miss;
   $("crashBar").hidden = !st.crashed;
+  $("resumeBtn").hidden = st.running || !st.stalled;
+  if (!st.running && st.stalled) $("stSub").textContent = "문제로 멈췄어요. 블룸에서 팝업 등을 해결한 뒤 [이슈 확인했어요]를 누르면 바로 이어서 찾아요";
   $("gpsRow").hidden = !st.gps; $("gpsNow").textContent = st.gps ? `지금 위치: ${st.gps[0]} ${st.gps[1]}` : "";
   $("soundBtn").textContent = st.sound ? "블룸 소리 끄기 (다른 앱 소리는 그대로)" : "블룸 소리 켜기 (지금 꺼져 있음)";
   $("updBar").hidden = !st.update;
@@ -367,6 +371,8 @@ $("updBtn").onclick = () => { $("updBtn").disabled = true; $("updBtn").textConte
   post("/api/update").then(r => { toast(r.ok || r.error); if (r.error) { $("updBtn").disabled = false; $("updBtn").textContent = "지금 업데이트"; } }); };
 $("clearPhotos").onclick = () => { if (confirm("확인용 사진을 전부 지울까요?")) post("/api/photos_clear").then(r => { toast(r.ok || r.error); poll(); }); };
 $("audit").onclick = e => $("hist").onclick(e);  // 복사·지도 버튼은 찾은 내역과 같게
+$("resumeBtn").onclick = () => { $("resumeBtn").disabled = true;
+  post("/api/resume").then(r => { toast(r.ok || r.error); $("resumeBtn").disabled = false; poll(); }); };
 $("soundBtn").onclick = () => post("/api/sound", {on: !st.sound}).then(r => { toast(r.ok || r.error); poll(); });
 $("gpsOff").onclick = () => post("/api/gps_off").then(r => { toast(r.ok || r.error); poll(); });
 $("cleanBtn").onclick = () => post("/api/cleanup").then(r => { toast(r.ok || r.error); poll(); });

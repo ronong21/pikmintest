@@ -498,18 +498,6 @@ def bloom_focus():
             helper(f"focus-task {prev}")
 
 
-def touch_check():
-    """버섯이 안 눌릴 때: 블룸이 터치 자체를 받는지 아래 지도 전환 버튼으로 확인 (눌러 보고 다시 광역 지도로)."""
-    img = screencap()
-    p = find_ui(img, "toggle_wide")
-    if not p:
-        return "광역 지도 버튼이 안 보임 (팝업 등)"
-    tap(p[0] - 48 * img.shape[1] / REF_W, p[1])  # 왼쪽 아이콘(일반 지도)
-    time.sleep(2)
-    moved = find_ui(screencap(), "toggle_normal") is not None
-    goto_wide_map(5)
-    return "블룸이 버튼 터치에는 반응함 → 버섯 누르는 자리 문제" if moved else "블룸이 버튼 터치에도 반응 안 함 → 터치 자체가 안 들어감"
-
 
 def settle(img, tpls, want, x, y, tries=6):
     """지도가 드래그 뒤 미끄러지는 중이면 버섯 누르기가 '멈춤'으로만 먹힌다 → 화면이 멈출 때까지 기다린 뒤
@@ -582,7 +570,7 @@ def fetch_coords(x, y):
         front = front_app()
         print(f"   진단: 그때 폰 화면 앞에 있던 앱 = {front or '알 수 없음'}"
               + (" (블룸이 아니면, 다른 앱을 쓰는 중이라 블룸이 터치를 무시했을 수 있음)" if VD is not None else ""))
-        print("   진단: " + touch_check())
+        goto_wide_map(5)  # 누르다 다른 화면으로 넘어갔으면 광역 지도로 되돌림 (예전 '터치 확인'은 피크민 모드 버튼을 눌러서 뺌)
         return None
     tap(*label)
     time.sleep(2.5)

@@ -399,9 +399,10 @@ def press_locate(img, wide):
     time.sleep(2.5)
 
 
-def goto_wide_map(tries=15, zoom=True):
+def goto_wide_map(tries=15, zoom=True, locate=False):
     """블룸 첫 화면에서 광역 지도까지 자동으로: 안내 팝업 [OK] → 아래 나침반 버튼 → 아래 두 아이콘 중 오른쪽(광역 지도).
-    새로 들어갔거나 아직 줌아웃 안 했으면 '내 위치' 버튼으로 GPS 위치를 최신화한 뒤 최대로 줌아웃."""
+    새로 들어갔거나 아직 줌아웃 안 했으면 최대로 줌아웃. locate=True(찾기 시작·블룸 다시 띄움 때 한 번)면 줌아웃 전에
+    '내 위치' 버튼으로 GPS 위치를 최신화한다. 블룸은 그 버튼을 누르면 피크민 모드로 돌아가므로 광역 지도로 다시 들어간다."""
     entered = False
     for _ in range(tries):
         img = screencap()
@@ -409,8 +410,12 @@ def goto_wide_map(tries=15, zoom=True):
             save_public("scout_now.jpg", img, gallery=False)
         wide = find_ui(img, "toggle_wide")
         if wide:
+            if locate:  # 한 번만 누르고, 피크민 모드로 바뀌었으면 '내 위치' 없이 다시 광역 지도로 (계속 누르는 반복 방지)
+                press_locate(img, wide)
+                if not find_ui(screencap(), "toggle_wide"):
+                    print("   '내 위치' 뒤 피크민 모드로 바뀌어서 다시 광역 지도로 들어갑니다")
+                return goto_wide_map(tries, zoom)  # 다시 들어가며 줌아웃
             if zoom and (entered or not _zoomed):
-                press_locate(img, wide)  # '내 위치'는 줌을 되돌리므로 줌아웃보다 먼저
                 zoom_out(img.shape)
             return True
         entered = True
@@ -988,14 +993,14 @@ def _scan(tpls, cells, want, rounds, max_people, once):
     launch_pikmin()
     time.sleep(3)  # 피크민 블룸을 앞으로 띄우고 지도가 그려질 때까지
     with bloom_focus():
-        ok = goto_wide_map()
+        ok = goto_wide_map(locate=True)
     if not ok:  # 팝업 등으로 못 들어감 → 블룸을 껐다 켜서 한 번 더
         print("   광역 지도로 못 들어가서 블룸을 껐다가 다시 띄웁니다")
         adb("shell", f"am force-stop {PIKMIN_PKG}", check=False)
         launch_pikmin()
         time.sleep(10)
         with bloom_focus():
-            ok = goto_wide_map()
+            ok = goto_wide_map(locate=True)
     if not ok:
         notify("버섯 탐지기: 광역 지도로 못 들어감", "메뉴 5번 사진으로 블룸 화면을 확인해 주세요")
         return
@@ -1142,7 +1147,7 @@ def _scan(tpls, cells, want, rounds, max_people, once):
                     launch_pikmin()
                     time.sleep(10)
                     with bloom_focus():
-                        goto_wide_map()  # 새로 들어가므로 '내 위치' 최신화 + 줌아웃까지
+                        goto_wide_map(locate=True)  # '내 위치'로 GPS 최신화 + 줌아웃까지
                     pos, walk, prev, still = (0, 0), explore(flip=flip), None, 0
                     cell, reported, audited, visited = next(walk), [], [], {}
                     continue

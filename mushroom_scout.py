@@ -390,16 +390,27 @@ def zoom_out(shape):
     print("   광역 지도 줌아웃 (더 넓게)")
 
 
+def press_locate(img, wide):
+    """광역 지도 오른쪽 아래 '내 위치' 버튼: 블룸이 GPS 위치를 새로 받아 지도를 내 자리 가운데로 맞춘다
+    (GPS 주말 모드로 옮긴 뒤 이걸 눌러야 블룸이 새 위치로 간다). 버튼을 못 알아보면 지도 전환 버튼과 같은 높이의 오른쪽 끝을 누른다."""
+    p = find_ui(img, "locate", 0.75) or (0.9 * img.shape[1], wide[1])
+    print("   지도를 내 위치(GPS)로 최신화")
+    tap(*p)
+    time.sleep(2.5)
+
+
 def goto_wide_map(tries=15, zoom=True):
     """블룸 첫 화면에서 광역 지도까지 자동으로: 안내 팝업 [OK] → 아래 나침반 버튼 → 아래 두 아이콘 중 오른쪽(광역 지도).
-    새로 들어갔거나 아직 줌아웃 안 했으면 최대로 줌아웃."""
+    새로 들어갔거나 아직 줌아웃 안 했으면 '내 위치' 버튼으로 GPS 위치를 최신화한 뒤 최대로 줌아웃."""
     entered = False
     for _ in range(tries):
         img = screencap()
         if VD is not None:
             save_public("scout_now.jpg", img, gallery=False)
-        if find_ui(img, "toggle_wide"):
+        wide = find_ui(img, "toggle_wide")
+        if wide:
             if zoom and (entered or not _zoomed):
+                press_locate(img, wide)  # '내 위치'는 줌을 되돌리므로 줌아웃보다 먼저
                 zoom_out(img.shape)
             return True
         entered = True
@@ -992,15 +1003,6 @@ def _scan(tpls, cells, want, rounds, max_people, once):
     audited = []  # 검수 사진을 찍은 버섯 위치 (같은 버섯을 또 누르지 않게)
     prev, still = None, 0  # 직전 화면, 연속으로 안 움직인 횟수
     pos, shape = (0, 0), screencap().shape
-    # 폰 화면 모드는 지도가 예전에 옮긴 자리에 남아 있을 수 있고, GPS 주말 모드는 막 옮긴 위치로 → '내 위치' 버튼으로 가운데 맞춤
-    if VD is None or GPS:
-        img0 = screencap()
-        p = find_ui(img0, "locate", 0.75)
-        if p:
-            print("   지도를 내 위치로 되돌림")
-            tap(*p)
-            time.sleep(2)
-            zoom_out(img0.shape)
     # 본 곳 기억: 같은 자리에서 다시 시작하면 MEMORY_HOURS 안에 본 칸은 건너뛰고 이어서 바깥쪽으로
     loc = my_location()
     prev_cells = load_memory(loc)
@@ -1140,12 +1142,7 @@ def _scan(tpls, cells, want, rounds, max_people, once):
                     launch_pikmin()
                     time.sleep(10)
                     with bloom_focus():
-                        goto_wide_map()
-                        p = find_ui(screencap(), "locate", 0.75)
-                        if p:
-                            tap(*p)
-                            time.sleep(2)
-                            zoom_out(shape)
+                        goto_wide_map()  # 새로 들어가므로 '내 위치' 최신화 + 줌아웃까지
                     pos, walk, prev, still = (0, 0), explore(flip=flip), None, 0
                     cell, reported, audited, visited = next(walk), [], [], {}
                     continue

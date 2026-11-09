@@ -294,7 +294,7 @@ function feedOf(log, want) {
     else if (l.includes("검수 기록")) out.push(["", l.trim()]);
     else if (l.includes("GPS 주말 모드") || l.includes("이어받았어요") || l.includes("이슈 확인 →")) out.push(["", l.trim()]);
     else if (l.includes("GPS 확인") || l.includes("GPS 검수")) out.push([/실패|안 옮겨|덮어써/.test(l) ? "warn" : "good", l.trim()]);
-    else if (l.includes("내 위치로 되돌림")) out.push(["", "지도를 내 위치(GPS)로 가운데 맞춤"]);
+    else if (l.includes("내 위치(GPS)로 최신화")) out.push(["", "광역 지도 '내 위치' 버튼으로 GPS 위치 최신화"]);
     else if (l.includes("광역 지도로 못 들어가서 블룸을")) out.push(["warn", "광역 지도로 못 들어가서 블룸을 껐다가 다시 띄움"]);
     else if (l.includes("포커스 줌")) out.push([l.includes("실패") ? "warn" : "", "다른 앱을 쓰는 중이라 버섯 누르는 동안만 블룸을 잠깐 앞으로 (끝나면 돌려줌)" + (l.includes("실패") ? " - " + l.split("실패: ")[1] : "")]);
     else if (l.includes("껐다가 다시 띄웁니다")) out.push(["warn", "지도가 계속 안 움직여서 블룸을 다시 띄움"]);

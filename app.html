@@ -95,6 +95,8 @@ input[type=text]{font:inherit;width:100%;padding:10px;border-radius:10px;border:
 <div class="card">
   <h2>찾을 버섯</h2>
   <div class="targets" id="targets"></div>
+  <label class="switch"><input type="checkbox" id="gps"><span><b>GPS 주말 모드</b> <span class="sub">— [찾기 시작] 때 지금 '그 나라 시간'으로 주말인 도시(붐비는 곳·적당히 붐비는 곳 중 랜덤)로 위치를 옮겨 찾아요. 한국 금요일 밤엔 시드니·오클랜드, 월요일엔 LA·호놀룰루. 주말인 곳이 없으면(화~목) 내 자리에서.</span></span></label>
+  <div class="row" id="gpsRow" hidden style="margin:-4px 0 8px"><span class="sub" id="gpsNow" style="flex:1"></span><button id="gpsOff">원래 위치로</button></div>
   <label class="switch"><input type="checkbox" id="bg" checked><span><b>백그라운드</b> <span class="sub">— 블룸이 안 보이는 화면에서 돌아요. 폰을 쓰거나 화면을 꺼도 됨. 끄면 블룸을 폰 화면에 띄워 보면서 찾아요.</span></span></label>
   <details>
     <summary class="sub">찾기 설정</summary>
@@ -197,6 +199,10 @@ input[type=text]{font:inherit;width:100%;padding:10px;border-radius:10px;border:
       <li>백그라운드로 찾는 동안 <b>블룸 앱을 직접 열지 마세요</b>. 서로 화면을 뺏어 엉켜요. 블룸을 하려면 먼저 [중지].</li>
       <li>블룸 GPS 등으로 위치를 바꾸면 그 주변을 찾게 돼요.</li>
       <li>폰을 <b>재부팅</b>하면 Shizuku 를 다시 켜야 해요 (와이파이 연결 → Shizuku 앱 [시작]). 위 오른쪽 표시가 빨갛게 돼요.</li>
+      <li><b>다른 앱을 쓰는 중</b>에 버섯 후보가 나오면, 버섯을 누르는 몇 초 동안만 블룸을 잠깐 앞으로 불러요(안 그러면 블룸이 터치를 무시함). 그동안 쓰던 앱의 키보드가 잠깐 닫힐 수 있고, 끝나면 쓰던 앱으로 돌려줘요.</li>
+      <li><b>GPS 주말 모드</b>는 폰 위치를 다른 도시로 바꾸는 기능이에요(모의 위치). 블룸이 알아채면 위치가 안 잡히거나 계정 제재를 받을 수 있으니 본인 판단으로 쓰세요. 다른 위치 바꾸기 앱과 같이 켜지 마세요. [원래 위치로]나 [모두 끄기]를 누르면 진짜 위치로 돌아와요.</li>
+      <li><b>블룸 소리 끄기</b>는 블룸 소리만 막아요. 음악·영상 등 다른 앱 소리는 그대로예요. 다시 누르면 켜져요.</li>
+      <li>찾는 중에 홈 화면 [버섯찾기]를 다시 눌러도 찾기는 멈추지 않아요(앱 화면이 꺼져 있었으면 다시 켜면서 찾던 작업을 이어받아요).</li>
       <li>오래 돌릴 땐 <b>충전기</b>를 꽂아 두세요. 배터리 15% 이하(충전 안 함)면 알아서 멈춰요.</li>
       <li>이 화면을 닫아도 계속 찾아요. 다시 보려면 홈 화면 [버섯찾기].</li>
       <li>Termux 창을 '닫기(Exit)'하면 탐지기가 꺼져요. 홈 버튼으로 나가는 건 괜찮아요.</li>
@@ -204,6 +210,7 @@ input[type=text]{font:inherit;width:100%;padding:10px;border-radius:10px;border:
   </details>
 </div>
 
+<button id="soundBtn" style="width:100%;margin-bottom:8px">블룸 소리 끄기 (다른 앱 소리는 그대로)</button>
 <button id="cleanBtn" style="width:100%;margin-bottom:8px">임시 파일 정리 (확인용 사진·기록 사진 지우기, 찾은 내역·검수는 그대로)</button>
 <button id="resetBtn" style="width:100%;margin-bottom:8px">리셋 — 찾은 내역·사진·검수 모두 지우고 처음부터</button>
 <button id="quitBtn" style="width:100%">모두 끄기 (블룸·탐지기 끄기, Shizuku 는 켜 둠)</button>
@@ -213,7 +220,8 @@ input[type=text]{font:inherit;width:100%;padding:10px;border-radius:10px;border:
 
 <script>
 const $ = id => document.getElementById(id);
-const SETS = ["max_people", "cells", "tap_ms", "max_minutes", "vd_scale", "zoom", "audit_set", "memory_hours"];
+const SETS = ["max_people", "cells", "tap_ms", "max_minutes", "vd_scale", "zoom", "audit_set", "memory_hours", "gps"];
+const val = k => $(k).type === "checkbox" ? +$(k).checked : +$(k).value;
 let sel = null, st = null, histKey = "", targetsKey = "";
 const store = {get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } },
                set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} }};
@@ -226,7 +234,8 @@ const ago = t => { const m = Math.round((Date.now() - new Date(t.replace(" ", "T
   return m < 1 ? "방금" : m < 60 ? `${m}분 전` : m < 1440 ? `${Math.floor(m / 60)}시간 전` : `${Math.floor(m / 1440)}일 전`; };
 const zoom = src => { $("lbImg").src = src; $("lb").hidden = false; };
 
-SETS.forEach(k => { const v = store.get("set_" + k); if (v) $(k).value = v; $(k).onchange = () => store.set("set_" + k, $(k).value); });
+SETS.forEach(k => { const v = store.get("set_" + k); if (v) $(k).type === "checkbox" ? $(k).checked = v === "1" : $(k).value = v;
+  $(k).onchange = () => store.set("set_" + k, String(val(k))); });
 const bgSaved = store.get("bg"); if (bgSaved !== null) $("bg").checked = bgSaved === "1";
 $("bg").onchange = () => store.set("bg", $("bg").checked ? "1" : "0");
 
@@ -281,6 +290,9 @@ function feedOf(log, want) {
     else if (l.includes("까맣게")) out.push(["warn", "블룸 화면이 까맣게 나와서 블룸을 다시 띄움"]);
     else if (l.includes("광역 지도로 다시 들어가 봅니다")) out.push(["warn", "지도가 안 움직여서 광역 지도로 다시 들어가 봄"]);
     else if (l.includes("검수 기록")) out.push(["", l.trim()]);
+    else if (l.includes("GPS 주말 모드") || l.includes("이어받았어요")) out.push(["", l.trim()]);
+    else if (l.includes("포커스 줌")) out.push([l.includes("실패") ? "warn" : "", "다른 앱을 쓰는 중이라 버섯 누르는 동안만 블룸을 잠깐 앞으로 (끝나면 돌려줌)" + (l.includes("실패") ? " - " + l.split("실패: ")[1] : "")]);
+    else if (l.includes("껐다가 다시 띄웁니다")) out.push(["warn", "지도가 계속 안 움직여서 블룸을 다시 띄움"]);
     else if (l.includes("배터리") || l.includes("6번") || l.includes("멈춥니다")) out.push(["bad", l.trim()]);
     else if (l.includes("중지했습니다")) out.push(["", "중지했어요"]);
     else if (l.includes("자동으로 다시 시작")) out.push(["warn", l.trim()]);
@@ -301,6 +313,8 @@ function render() {
   $("stats").hidden = !st.started;
   $("sCells").textContent = f.cells; $("sCand").textContent = f.cand; $("sFound").textContent = f.found; $("sMiss").textContent = f.miss;
   $("crashBar").hidden = !st.crashed;
+  $("gpsRow").hidden = !st.gps; $("gpsNow").textContent = st.gps ? `지금 위치: ${st.gps[0]} ${st.gps[1]}` : "";
+  $("soundBtn").textContent = st.sound ? "블룸 소리 끄기 (다른 앱 소리는 그대로)" : "블룸 소리 켜기 (지금 꺼져 있음)";
   $("updBar").hidden = !st.update;
   $("shz").textContent = st.shizuku === false ? "Shizuku 꺼짐" : st.shizuku ? "Shizuku 연결됨" : "Shizuku 확인 중";
   $("shz").classList.toggle("off", st.shizuku === false);
@@ -353,6 +367,8 @@ $("updBtn").onclick = () => { $("updBtn").disabled = true; $("updBtn").textConte
   post("/api/update").then(r => { toast(r.ok || r.error); if (r.error) { $("updBtn").disabled = false; $("updBtn").textContent = "지금 업데이트"; } }); };
 $("clearPhotos").onclick = () => { if (confirm("확인용 사진을 전부 지울까요?")) post("/api/photos_clear").then(r => { toast(r.ok || r.error); poll(); }); };
 $("audit").onclick = e => $("hist").onclick(e);  // 복사·지도 버튼은 찾은 내역과 같게
+$("soundBtn").onclick = () => post("/api/sound", {on: !st.sound}).then(r => { toast(r.ok || r.error); poll(); });
+$("gpsOff").onclick = () => post("/api/gps_off").then(r => { toast(r.ok || r.error); poll(); });
 $("cleanBtn").onclick = () => post("/api/cleanup").then(r => { toast(r.ok || r.error); poll(); });
 $("resetBtn").onclick = () => { if (confirm("찾기를 멈추고 찾은 내역·확인용 사진·검수 기록을 모두 지울까요? 다시 [찾기 시작]하면 처음 자리부터 새로 돌아요."))
   post("/api/reset").then(r => { toast(r.ok || r.error); histKey = ""; render.ak = ""; poll(); }); };
@@ -376,7 +392,7 @@ function poll() {
 $("startBtn").onclick = () => {
   if (!sel) return toast("버섯을 골라 주세요");
   if (st && st.shizuku === false) return toast("Shizuku 가 꺼져 있어요. 먼저 켜 주세요");
-  const opts = Object.fromEntries(SETS.map(k => [k === "audit_set" ? "audit" : k, +$(k).value]));
+  const opts = Object.fromEntries(SETS.map(k => [k === "audit_set" ? "audit" : k, val(k)]));
   $("startBtn").disabled = true;
   post("/api/start", {target: sel, bg: $("bg").checked, opts}).then(r => { toast(r.ok); poll(); });
 };

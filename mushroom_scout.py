@@ -8,7 +8,7 @@ max-people 이하일 때 버섯 → 이름표 → 여기로 이동 → 지도 �
   python mushroom_scout.py scan --want fancy_giant       # 거대 화려한 버섯(4명 이하) 좌표 찾기
   python mushroom_scout.py selftest                      # 탐지 로직·템플릿 자체 점검
 """
-import argparse, glob, itertools, json, os, random, re, shlex, shutil, signal, subprocess, sys, threading, time
+import argparse, contextlib, datetime, glob, itertools, json, os, random, re, shlex, shutil, signal, subprocess, sys, threading, time
 
 import cv2
 import numpy as np
@@ -360,14 +360,12 @@ _zoomed = False
 
 def pinch(shape, zoom_in=False):
     """두 손가락 오므리기(줌아웃) / 벌리기(줌인) 2번. 도우미가 터치를 직접 넣는다."""
-    install_dex()
     h, w = shape[:2]
     a, b = w * 0.38, w * 0.05
     if zoom_in:
         a, b = b, a
     for _ in range(2):
-        adb("shell", f"CLASSPATH={VD_DEX} app_process / ScoutDisplay pinch {VD or 0} {w / 2:.0f} {h * 0.5:.0f} "
-                     f"{a:.0f} {b:.0f}", check=False, timeout=20)
+        helper(f"pinch {VD or 0} {w / 2:.0f} {h * 0.5:.0f} {a:.0f} {b:.0f}")
         time.sleep(0.8)
 
 
@@ -438,6 +436,37 @@ def press(x, y, ms=80):
         return tap(x, y)
     time.sleep(ms / 1000)
     adb("shell", "input", "motionevent", "UP", x, y, check=False)
+
+
+def helper(args, timeout=20):
+    """가상 화면 도우미(dex)의 한 번짜리 명령 (pinch, focus 등)."""
+    install_dex()
+    return adb("shell", f"CLASSPATH={VD_DEX} app_process / ScoutDisplay {args}", check=False, timeout=timeout)
+
+
+def front_app():
+    """폰 화면 앞에 있는(포커스를 가진) 앱 이름. 모르면 ''."""
+    m = re.search(r"mCurrentFocus=Window\{\S+ \S+ ([\w.]+)", adb("shell", "dumpsys window | grep mCurrentFocus", check=False))
+    return m.group(1) if m else ""
+
+
+@contextlib.contextmanager
+def bloom_focus():
+    """가상 화면 모드에서 다른 앱(브라우저 등)을 쓰는 중이면 블룸이 포커스가 없어 지도 위 버섯·지도 터치를 무시한다.
+    → 이 안에서만 블룸에 포커스를 주고, 끝나면 쓰던 앱으로 돌려준다 (그 몇 초 동안은 쓰던 앱의 키보드가 잠깐 닫힐 수 있음)."""
+    prev = None
+    front = front_app() if VD is not None else PIKMIN_PKG
+    if PIKMIN_PKG not in front:
+        out = helper(f"focus {VD}")
+        m = re.search(r"prev (-?\d+)", out)
+        prev = int(m.group(1)) if m else None
+        print(f"   블룸에 잠깐 포커스 줌 (앞에 있던 앱: {front or '알 수 없음'})"
+              + ("" if "focused" in out else f" - 실패: {out.strip()[-150:] or '응답 없음'}"))
+    try:
+        yield
+    finally:
+        if prev and prev > 0:
+            helper(f"focus-task {prev}")
 
 
 def touch_check():
@@ -517,11 +546,12 @@ def fetch_coords(x, y):
         strip = np.hstack([cv2.resize(p, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA) for p in panels])
         save_public("scout_nolabel.jpg", strip)
         changes = ", ".join(f"{t[0]} {d:.1f}" for t, d in zip(tries, diffs))
-        verdict = "거의 그대로 → 터치가 블룸에 안 들어감" if max(diffs) < 1.5 else "화면은 바뀜 → 다른 것이 눌렸거나 지도가 밀림"
+        # 물결 등 지도 자체 움직임이 2~3 정도 나온다 → 5 미만이면 터치가 안 먹은 것
+        verdict = "거의 그대로 → 터치가 블룸에 안 들어감" if max(diffs) < 5 else "화면이 크게 바뀜 → 다른 것이 눌렸거나 지도가 밀림"
         print("   이름표를 못 찾음 → 확인용 사진 (왼쪽부터 누르기 전 · 1번 · 2번 · 3번 누른 뒤). 다음 바퀴에 다시 시도")
         print(f"   진단: 누른 뒤 화면 변화 [{changes}] → {verdict}")
-        front = re.search(r"mCurrentFocus=Window\{\S+ \S+ ([\w.]+)", adb("shell", "dumpsys window | grep mCurrentFocus", check=False))
-        print(f"   진단: 그때 폰 화면 앞에 있던 앱 = {front.group(1) if front else '알 수 없음'}"
+        front = front_app()
+        print(f"   진단: 그때 폰 화면 앞에 있던 앱 = {front or '알 수 없음'}"
               + (" (블룸이 아니면, 다른 앱을 쓰는 중이라 블룸이 터치를 무시했을 수 있음)" if VD is not None else ""))
         print("   진단: " + touch_check())
         return None
@@ -597,13 +627,66 @@ def stuck_report(img):
     """지도가 안 움직임(팝업·로딩·로그아웃 등): 지금 화면을 사진으로 남기고 알린다."""
     path = save_public("scout_stuck.jpg", img)
     notify("버섯 탐지기: 지도가 안 움직여요", "블룸에 팝업이 떴을 수 있어요. 메뉴 5번(확인용 사진)으로 보고, 메뉴 1번으로 직접 닫아 주세요")
-    print(f"   지도가 3번 연속 안 움직여서 멈춥니다. 지금 화면 사진: {path}")
+    print(f"   지도가 계속 안 움직여서(블룸 다시 띄워도) 멈춥니다. 지금 화면 사진: {path}")
 
 
 def notify(title, text):
     """폰 알림 띄우기. Shizuku(셸 권한)의 cmd notification 이라 추가 앱이 필요 없다."""
     if sys.platform != "win32":
         adb("shell", f"cmd notification post -S bigtext -t {shlex.quote(title)} scout{random.randint(0, 9999)} {shlex.quote(text)}", check=False)
+
+
+# GPS 주말 모드: 거대 버섯은 '그 나라 시간' 주말에 나온다 → 지금 주말인 도시로 위치를 옮겨 찾는다.
+# (지역, 시간대, 시간대 못 읽을 때의 UTC 시차, 사람 많은 순위(클수록 많음), [(이름, 위도, 경도)] = 붐비는 곳 · 적당히 붐비는 곳)
+# 금요일 저녁(한국)엔 오클랜드·시드니가 먼저 토요일, 월요일(한국)엔 LA·호놀룰루가 아직 일요일
+GPS_SPOTS = [
+    ("서울", "Asia/Seoul", 9, 3, [("강남역", 37.4979, 127.0276), ("분당 서현역", 37.3850, 127.1230)]),
+    ("도쿄", "Asia/Tokyo", 9, 3, [("시부야", 35.6595, 139.7005), ("기치조지", 35.7031, 139.5798)]),
+    ("LA", "America/Los_Angeles", -8, 3, [("LA 다운타운", 34.0522, -118.2437), ("어바인 스펙트럼", 33.6506, -117.7437)]),
+    ("시드니", "Australia/Sydney", 11, 2, [("시드니 타운홀", -33.8731, 151.2065), ("파라마타", -33.8170, 151.0034)]),
+    ("오클랜드", "Pacific/Auckland", 13, 1, [("오클랜드 퀸 스트리트", -36.8485, 174.7633), ("뉴마켓", -36.8696, 174.7781)]),
+    ("호놀룰루", "Pacific/Honolulu", -10, 1, [("와이키키", 21.2767, -157.8270), ("카일루아", 21.3972, -157.7394)]),
+]
+GPS_PROVIDERS = ("gps", "network", "fused")
+
+
+def gps_pick(now=None):
+    """지금 현지 시각이 주말(토·일)인 지역 중 사람 많은 지역 → 그 안의 두 곳 중 랜덤. 주말인 곳이 없으면 None.
+    돌려주는 값: (지역, 장소 이름, 위도, 경도)"""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    ok = []
+    for region, tz, off, rank, places in GPS_SPOTS:
+        try:
+            from zoneinfo import ZoneInfo
+            local = now.astimezone(ZoneInfo(tz))
+        except Exception:  # ponytail: 시간대 자료가 없는 폰이면 고정 시차(서머타임 1시간 오차), tzdata 설치로 해결
+            local = now.astimezone(datetime.timezone(datetime.timedelta(hours=off)))
+        if local.weekday() >= 5:
+            ok.append((rank, region, places))
+    if not ok:
+        return None
+    top = max(r for r, _, _ in ok)
+    region, places = random.choice([(g, p) for r, g, p in ok if r == top])
+    return (region,) + random.choice(places)
+
+
+def gps_set(lat, lng):
+    """폰 위치를 (lat, lng)로 바꾼다 (셸의 '모의 위치' 테스트 기능). 블룸은 몇 초 뒤 그 자리로 옮겨 간다."""
+    cmds = ["appops set com.android.shell android:mock_location allow"]
+    for p in GPS_PROVIDERS:
+        cmds += [f"cmd location providers add-test-provider {p} 2>/dev/null", f"cmd location providers set-test-provider-enabled {p} true",
+                 f"cmd location providers set-test-provider-location {p} --location {lat},{lng} --accuracy 5"]
+    return adb("shell", "; ".join(cmds), check=False)
+
+
+def gps_clear():
+    """원래 위치(진짜 GPS)로 돌아감."""
+    adb("shell", "; ".join(f"cmd location providers remove-test-provider {p}" for p in GPS_PROVIDERS), check=False)
+
+
+def bloom_sound(on):
+    """블룸 소리만 켜고 끄기 (다른 앱 음악·영상 소리는 그대로). 셸의 앱 권한(PLAY_AUDIO)으로 블룸 소리를 막는다."""
+    adb("shell", f"appops set {PIKMIN_PKG} PLAY_AUDIO {'allow' if on else 'ignore'}", check=False)
 
 
 def history():
@@ -646,7 +729,8 @@ def annotate(img, hits):
     out = img.copy()
     for n, sc, x, y in hits:
         cv2.circle(out, (x, y), 40, (0, 0, 255), 3)
-        cv2.putText(out, f"{n} {sc:.2f}", (x - 40, y - 48), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+        # 글씨는 원 아래에 (원 위쪽은 인원 배지라 겹치면 숫자가 안 보임)
+        cv2.putText(out, f"{n} {sc:.2f}" if sc else n, (x - 40, y + 72), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
     return out
 
 
@@ -893,10 +977,18 @@ def _scan(tpls, cells, want, rounds, max_people, once):
                 goto_wide_map()
                 prev, still = None, 0
                 continue
-            if still == 3:  # 3번 연속 안 움직임 → 광역 지도로 다시 들어가 보고, 6번이면 멈춤
+            if still == 3:  # 3번 연속 안 움직임 → 블룸에 포커스 주고 광역 지도로 다시, 6번이면 블룸을 새로 띄움, 9번이면 멈춤
                 print("   지도가 3번 연속 안 움직여서 광역 지도로 다시 들어가 봅니다")
-                goto_wide_map(5)
-            if still >= 6:
+                with bloom_focus():
+                    goto_wide_map(5)
+            if still == 6:
+                print("   그래도 안 움직여서 블룸을 껐다가 다시 띄웁니다")
+                adb("shell", f"am force-stop {PIKMIN_PKG}", check=False)
+                launch_pikmin()
+                time.sleep(10)
+                with bloom_focus():
+                    goto_wide_map()
+            if still >= 9:
                 stuck_report(img)
                 return
             if i % 10 == 0 and battery_low():
@@ -943,8 +1035,9 @@ def _scan(tpls, cells, want, rounds, max_people, once):
                 check = AUDIT and len(audited) < AUDIT_MAX and not any(
                     (gx - a) ** 2 + (gy - b) ** 2 < (0.25 * w) ** 2 for a, b in audited)
                 if ok or check:
-                    x, y = settle(cur, tpls, want, x, y)
-                    coords = fetch_coords(x, y)
+                    with bloom_focus():
+                        x, y = settle(cur, tpls, want, x, y)
+                        coords = fetch_coords(x, y)
                 if check:
                     audited.append((gx, gy))
                     audit_add(cur, n, x, y, people, coords, "조건 맞음" if ok else
@@ -1011,6 +1104,12 @@ def selftest():
     again = [next(w2)] + [w2.send(False) for _ in range(9)]
     assert not set(again) & set(order[:5]) and len(set(again)) == 10, again  # 본 칸 건너뜀
     assert {"ok", "compass", "toggle_normal", "toggle_wide"} <= set(UI), sorted(UI)  # 블룸 첫 화면 → 광역 지도
+    # GPS 주말 모드: 한국 금요일 밤 → 오세아니아, 한국 월요일 아침 → 미국(아직 일요일), 한국 수요일 낮 → 없음
+    utc = lambda *a: datetime.datetime(*a, tzinfo=datetime.timezone.utc)
+    assert gps_pick(utc(2026, 11, 13, 14))[0] in ("시드니", "오클랜드"), gps_pick(utc(2026, 11, 13, 14))  # 금 23시 KST
+    assert gps_pick(utc(2026, 11, 15, 23))[0] == "LA", gps_pick(utc(2026, 11, 15, 23))  # 월 08시 KST
+    assert gps_pick(utc(2026, 11, 16, 9))[0] == "호놀룰루"  # 월 18시 KST: LA 는 월요일 01시
+    assert gps_pick(utc(2026, 11, 11, 3)) is None  # 수 12시 KST
     # 좌표: 지도 앱 열기 전부터 있던 옛 주소는 빼고 새 주소만
     global adb
     real_adb, dumps = adb, iter(["query=37.111111,-122.111111", "query=37.111111,-122.111111 query=37.222222,-122.222222"])

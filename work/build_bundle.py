@@ -21,7 +21,9 @@ out += ["cat > ~/.shortcuts/.new <<'SHEOF'", read("work/shortcut.sh"), "SHEOF",
         "rm -f ~/.shortcuts/버섯내역 ~/.shortcuts/버섯찾기_백그라운드",
         "chmod 700 ~/.shortcuts ~/.shortcuts/버섯찾기",
         # 홈 화면 버튼이 Termux 창을 띄우려면 '다른 앱 위에 표시' 권한이 필요(안드로이드 10+). 절전 예외도 같이
-        "timeout --foreground 15 ~/bin/rish -c 'appops set com.termux SYSTEM_ALERT_WINDOW allow; dumpsys deviceidle whitelist +com.termux' </dev/null >/dev/null 2>&1 "
+        # 안드로이드 12+ '자식 프로세스 제한'이 오래 도는 앱 서버·찾기 작업을 몰래 끄지 않게 (개발자 옵션 '하위 프로세스 제한 사용 안함'과 같음)
+        "timeout --foreground 15 ~/bin/rish -c 'appops set com.termux SYSTEM_ALERT_WINDOW allow; dumpsys deviceidle whitelist +com.termux; "
+        "settings put global settings_enable_monitor_phantom_procs false; device_config put activity_manager max_phantom_processes 2147483647' </dev/null >/dev/null 2>&1 "
         "&& echo '홈 화면 버튼 권한 OK' || echo '※ Shizuku 가 꺼져 있어 버튼 권한을 못 켰습니다. Shizuku [시작] 후 다시 실행하세요'",
         "cd ~/scout && python mushroom_scout.py selftest && echo '설치/업데이트 완료'"]
 open("scout_setup.sh", "w", encoding="utf-8", newline="\n").write("\n".join(out) + "\n")

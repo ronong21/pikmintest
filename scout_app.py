@@ -17,9 +17,11 @@ PHOTOS = {"now": "scout_now.jpg", "label": "scout_label.jpg", "nolabel": "scout_
 VERSION = hashlib.md5(b"".join(open(os.path.join(ms.HERE, f), "rb").read()
                               for f in ("scout_app.py", "mushroom_scout.py", "app.html"))).hexdigest()[:8]
 BUILD = open(os.path.join(ms.HERE, "version.txt"), encoding="utf-8").read().strip()     if os.path.exists(os.path.join(ms.HERE, "version.txt")) else ""  # 예: v58 · 2026-11-02 18:40
+SCAN_STATE = os.path.join(ms.HERE, "scan_state.json")  # 지금 찾는 작업 정보 (앱 서버가 다시 켜져도 이어받게)
+SOUND_OFF = os.path.join(ms.HERE, ".sound_off")  # 있으면 블룸 소리 끔
 state = {"proc": None, "target": None, "bg": True, "started": None, "user_stop": False, "shizuku": None,
-         "opts": {}, "restarts": 0, "update": False}
-SETTINGS = {"max_people": (4, 0, 4), "cells": (40, 10, 120), "tap_ms": (100, 50, 1000), "max_minutes": (0, 0, 720), "vd_scale": (100, 50, 100), "zoom": (1, 0, 1), "audit": (1, 0, 1), "memory_hours": (2, 0, 24)}  # 이름: (기본, 최소, 최대)
+         "opts": {}, "restarts": 0, "update": False, "gps": None}
+SETTINGS = {"max_people": (4, 0, 4), "cells": (40, 10, 120), "tap_ms": (100, 50, 1000), "max_minutes": (0, 0, 720), "vd_scale": (100, 50, 100), "zoom": (1, 0, 1), "audit": (1, 0, 1), "memory_hours": (2, 0, 24), "gps": (0, 0, 1)}  # 이름: (기본, 최소, 최대)
 
 
 def watch_shizuku():
@@ -45,6 +47,31 @@ def sh(cmd):
 def termux(*cmd):
     if shutil.which(cmd[0]):
         subprocess.run(list(cmd), capture_output=True)
+
+
+class Adopted:
+    """앱 서버가 꺼졌다 다시 켜졌을 때, 예전 서버가 띄운 찾기 작업을 끄지 않고 이어받는다 (Popen 처럼 쓰는 부분만)."""
+    def __init__(self, pid):
+        self.pid = pid
+
+    def poll(self):
+        return None if os.path.exists(f"/proc/{self.pid}") else 0
+
+    def send_signal(self, sig):
+        try:
+            os.kill(self.pid, sig)
+        except OSError:
+            pass
+
+    def wait(self, timeout):
+        for _ in range(int(timeout)):
+            if self.poll() is not None:
+                return 0
+            time.sleep(1)
+        raise subprocess.TimeoutExpired("scan", timeout)
+
+    def kill(self):
+        self.send_signal(signal.SIGKILL)
 
 
 def running():
@@ -106,6 +133,34 @@ def do_update():
     return {"ok": "업데이트했어요. 잠시 뒤 새 버전으로 바뀝니다" + (" (찾기는 이어서 계속)" if resume else "")}
 
 
+def watch_gps():
+    """GPS 주말 모드 중엔 30초마다 같은 위치를 다시 넣어 준다 (안 넣으면 블룸이 위치 신호를 잃음)."""
+    while True:
+        time.sleep(30)
+        if state["gps"]:
+            ms.gps_set(*state["gps"][2:])
+
+
+def gps_apply(on):
+    """[찾기 시작] 때: 켜져 있으면 지금 주말인 도시로 위치 이동, 꺼져 있으면 원래 위치로. 진행 기록에 남길 문장을 돌려준다."""
+    if not on:
+        if state["gps"]:
+            ms.gps_clear()
+            state["gps"] = None
+            return "GPS 주말 모드 꺼짐 → 원래 위치로 돌아왔어요\n"
+        return ""
+    spot = ms.gps_pick()
+    if not spot:
+        if state["gps"]:
+            ms.gps_clear()
+            state["gps"] = None
+        return "GPS 주말 모드: 지금 주말인 도시가 없어서(한국 화~목) 위치를 옮기지 않고 내 자리에서 찾아요\n"
+    state["gps"] = spot
+    ms.gps_set(*spot[2:])
+    time.sleep(3)  # 블룸이 새 위치를 받을 시간
+    return f"GPS 주말 모드: 지금 주말인 {spot[0]}의 '{spot[1]}'({spot[2]},{spot[3]})로 위치를 옮겼어요\n"
+
+
 def watch_crash():
     """찾기가 오류로 멈추면 30초 뒤 같은 설정으로 다시 시작 (한 번 [찾기 시작]에 최대 3번)."""
     while True:
@@ -128,6 +183,7 @@ def start(target, bg, opts, keep_log=False):
     if target not in ms.all_targets():
         return "모르는 버섯입니다"
     termux("termux-wake-lock")
+    first = gps_apply(str(opts.get("gps", 0)) == "1") if not keep_log else ""
     cmd = [sys.executable, "-u", os.path.join(ms.HERE, "mushroom_scout.py"), "scan", "--want", target] + (["--bg"] if bg else [])
     for k, (dflt, lo, hi) in SETTINGS.items():  # 화면의 설정값 (범위 밖이면 기본값)
         try:
@@ -138,6 +194,8 @@ def start(target, bg, opts, keep_log=False):
         if k == "zoom":
             cmd += [] if v else ["--no-zoom"]
             continue
+        if k == "gps":  # 위치 옮기기는 앱 서버가 함 (찾기를 멈춰도 그 자리에 남아 있게)
+            continue
         if k == "audit":  # 거대 버섯을 찾을 때만 (잘 거르는지 확인용)
             name = ms.all_targets().get(target, "")
             cmd += ["--audit"] if v and ("giant" in target or "거대" in name) else []
@@ -145,9 +203,11 @@ def start(target, bg, opts, keep_log=False):
         cmd += ["--" + k.replace("_", "-"), str(v / 100 if k == "vd_scale" else v)]
     if not keep_log:
         state["restarts"] = 0
-    state.update(proc=subprocess.Popen(cmd, cwd=ms.HERE, stdin=subprocess.DEVNULL, stdout=open(LOG, "a" if keep_log else "w"),
+        open(LOG, "w", encoding="utf-8").write(first)
+    state.update(proc=subprocess.Popen(cmd, cwd=ms.HERE, stdin=subprocess.DEVNULL, stdout=open(LOG, "a"),
                                        stderr=subprocess.STDOUT), target=target, bg=bg, opts=opts,
                  started=state["started"] if keep_log else time.time(), user_stop=False)
+    json.dump({k: state[k] for k in ("target", "bg", "opts", "started", "gps")}, open(SCAN_STATE, "w", encoding="utf-8"))
     return "시작했습니다"
 
 
@@ -209,6 +269,13 @@ def reset_all():
     """처음부터 다시: 찾기 멈춤 → 찾은 내역·확인용 사진·기록 사진·검수 기록·진행 기록 모두 지움.
     (돌았던 곳 기록은 찾기 한 번 안에서만 쓰므로 다시 [찾기 시작]하면 처음 자리부터 새로 돈다)"""
     stop()
+    for pid, kind in our_procs().items():  # 이 서버가 모르는(예전 서버가 띄운) 찾기 작업도 멈춰야 검수 기록이 다시 안 생김
+        if kind == "scan":
+            Adopted(pid).send_signal(signal.SIGINT)
+            try:
+                Adopted(pid).wait(25)
+            except subprocess.TimeoutExpired:
+                Adopted(pid).kill()
     for p in [ms.FOUND, LOG, ms.MEMORY] + [os.path.join(DL, f) for f in PHOTOS.values()]:
         try:
             os.remove(p)
@@ -360,6 +427,8 @@ def delete_target(key):
 def quit_all():
     """찾기 중지 → 블룸 끄기 → 앱 서버와 Termux 끄기 (Shizuku 는 켜 둠: 다시 켜려면 와이파이가 필요해서)."""
     stop()
+    if state["gps"]:
+        ms.gps_clear()
     sh(f"pkill -f 'Scout[D]isplay'; dumpsys deviceidle enable; am force-stop {ms.PIKMIN_PKG}")
     sh("nohup sh -c 'sleep 2; am force-stop com.termux' >/dev/null 2>&1 &")
     threading.Thread(target=lambda: (time.sleep(1), os._exit(0)), daemon=True).start()
@@ -407,7 +476,8 @@ class H(BaseHTTPRequestHandler):
             p = state["proc"]
             crashed = p is not None and p.poll() not in (None, 0) and not state["user_stop"]
             return self.send({"version": VERSION, "build": BUILD, "running": running(), "target": state["target"], "bg": state["bg"],
-                              "started": state["started"], "log": tail(400), "crashed": crashed, "update": state["update"],
+                              "started": state["started"], "log": tail(400), "gps": state["gps"],
+                              "sound": not os.path.exists(SOUND_OFF), "crashed": crashed, "update": state["update"],
                               "audit": audit_rows(),
                               "shizuku": state["shizuku"], "settings": {k: v[0] for k, v in SETTINGS.items()},
                               "targets": targets(), "history": history(),
@@ -461,6 +531,18 @@ class H(BaseHTTPRequestHandler):
             text = f"{data.get('name', '버섯')} 인원 {data.get('people', '?')}명 {lat},{lng} https://www.google.com/maps/search/?api=1&query={lat},{lng}"
             sh("am start -a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT " + shlex.quote(text))
             return self.send({"ok": "공유 창을 열었습니다"})
+        if path == "/api/sound":  # 블룸 소리만 켜기/끄기
+            on = bool(data.get("on"))
+            ms.bloom_sound(on)
+            if on:
+                os.path.exists(SOUND_OFF) and os.remove(SOUND_OFF)
+            else:
+                open(SOUND_OFF, "w").close()
+            return self.send({"ok": "블룸 소리를 켰어요" if on else "블룸 소리를 껐어요 (다른 앱 소리는 그대로)"})
+        if path == "/api/gps_off":  # 원래 위치로
+            ms.gps_clear()
+            state["gps"] = None
+            return self.send({"ok": "원래 위치로 돌아왔어요"})
         if path == "/api/cleanup":
             return self.send({"ok": f"임시 파일 {cleanup()}KB 정리했어요 (찾은 내역·검수 기록은 그대로)"})
         if path == "/api/reset":
@@ -539,17 +621,27 @@ def main():
         else:
             sys.exit("예전 앱이 안 꺼집니다. Termux 를 강제 중지한 뒤 [버섯찾기]를 다시 눌러 주세요.")
     cleanup(include_photos=False)  # 켤 때마다 쓰다 만 사진 등 찌꺼기 정리
-    if os.path.isdir("/proc"):  # 주인 없는(예전 앱이 남긴) 찾기 작업이 돌고 있으면 정리
+    if os.path.isdir("/proc"):  # 앱 서버만 꺼지고 찾기 작업은 살아 있으면(위젯을 다시 누른 경우 등) 끄지 않고 이어받음
         for pid, kind in our_procs().items():
-            if kind == "scan":
-                print("예전에 남은 찾기 작업을 정리합니다.")
+            if kind != "scan":
+                continue
+            if running():  # 둘 이상이면 하나만 남김
                 os.kill(pid, signal.SIGINT)
+                continue
+            try:
+                saved = json.load(open(SCAN_STATE, encoding="utf-8"))
+            except (OSError, ValueError):
+                saved = {}
+            state.update(proc=Adopted(pid), target=saved.get("target"), bg=saved.get("bg", True), opts=saved.get("opts", {}),
+                         started=saved.get("started"), gps=saved.get("gps"))
+            print("찾던 작업이 아직 돌고 있어서 그대로 이어받았어요.")
     signal.signal(signal.SIGTERM, lambda *_: (stop(), os._exit(0)))
     if hasattr(signal, "SIGHUP"):
         signal.signal(signal.SIGHUP, lambda *_: (stop(), os._exit(0)))
     threading.Thread(target=watch_shizuku, daemon=True).start()
     threading.Thread(target=watch_crash, daemon=True).start()
     threading.Thread(target=watch_update, daemon=True).start()
+    threading.Thread(target=watch_gps, daemon=True).start()
     if os.environ.get("SCOUT_RESUME"):  # 업데이트 전에 찾던 것 이어서
         r = json.loads(os.environ.pop("SCOUT_RESUME"))
         threading.Timer(3, lambda: start(r["target"], r["bg"], r["opts"])).start()

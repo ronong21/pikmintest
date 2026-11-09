@@ -144,6 +144,16 @@ public final class ScoutDisplay {
                     Float.parseFloat(a[4]), Float.parseFloat(a[5]));
             return;
         }
+        if (a[0].equals("focus")) {  // focus <화면번호>: 그 화면 맨 위 작업(블룸)에 포커스. 원래 포커스였던 작업 번호를 prev 로 출력
+            focus(Integer.parseInt(a[1]));
+            return;
+        }
+        if (a[0].equals("focus-task")) {  // focus-task <작업번호>: 그 작업(원래 쓰던 앱)으로 포커스를 돌려줌
+            Object atm = atm();
+            method(atm, "setFocusedTask", 1).invoke(atm, Integer.parseInt(a[1]));
+            System.out.println("focused " + a[1]);
+            return;
+        }
         int w = Integer.parseInt(a[0]), h = Integer.parseInt(a[1]), dpi = Integer.parseInt(a[2]);
         File dir = new File(a[3]);
         // 폰 화면이 꺼져도 이 화면은 따로 켜져 있도록 OWN_DISPLAY_GROUP + ALWAYS_UNLOCKED (안드로이드 13+)
@@ -278,6 +288,33 @@ public final class ScoutDisplay {
         setDisplay.invoke(ev, display);
         inject.invoke(im, ev, 0);
         ev.recycle();
+    }
+
+    // 다른 앱이 앞에 있으면 가상 화면의 블룸(유니티)은 포커스가 없어 지도 위 버섯 터치를 무시한다
+    // → 버섯을 누르는 동안만 블룸 작업에 포커스를 준다 (STEAL_TOP_FOCUS_DISABLED 는 '터치로' 뺏는 것만 막는다)
+    static void focus(int display) throws Exception {
+        Object atm = atm();
+        Object cur = method(atm, "getFocusedRootTaskInfo", 0).invoke(atm);
+        System.out.println("prev " + (cur == null ? -1 : cur.getClass().getField("taskId").getInt(cur)));
+        java.util.List<?> tasks = (java.util.List<?>) method(atm, "getAllRootTaskInfosOnDisplay", 1).invoke(atm, display);
+        if (tasks == null || tasks.isEmpty()) {
+            System.out.println("no task on display " + display);
+            return;
+        }
+        int id = tasks.get(0).getClass().getField("taskId").getInt(tasks.get(0));
+        method(atm, "setFocusedTask", 1).invoke(atm, id);
+        System.out.println("focused " + id);
+    }
+
+    static Object atm() throws Exception {
+        IBinder b = (IBinder) Class.forName("android.os.ServiceManager").getMethod("getService", String.class).invoke(null, "activity_task");
+        return Class.forName("android.app.IActivityTaskManager$Stub").getMethod("asInterface", IBinder.class).invoke(null, b);
+    }
+
+    static Method method(Object o, String name, int params) throws NoSuchMethodException {
+        for (Method m : o.getClass().getMethods())
+            if (m.getName().equals(name) && m.getParameterCount() == params) return m;
+        throw new NoSuchMethodException(name);
     }
 
     static void step(String msg) {
